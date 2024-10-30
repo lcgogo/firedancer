@@ -35,6 +35,7 @@
 #define SCRATCH_MAX   ( 4UL /*KiB*/ << 10 )
 #define SCRATCH_DEPTH ( 4UL ) /* 4 scratch frames */
 
+
 struct fd_eqvoc_tile_ctx {
   fd_pubkey_t identity_key[1];
 
@@ -46,6 +47,13 @@ struct fd_eqvoc_tile_ctx {
   fd_wksp_t * contact_in_mem;
   ulong       contact_in_chunk0;
   ulong       contact_in_wmark;
+
+  fd_gossip_duplicate_shred_t duplicate_shred;
+
+  ulong       gossip_in_idx;
+  fd_wksp_t * gossip_in_mem;
+  ulong       gossip_in_chunk0;
+  ulong       gossip_in_wmark;
 
   fd_shred_t  shred;
 
@@ -84,9 +92,9 @@ handle_new_cluster_contact_info( fd_eqvoc_tile_ctx_t * ctx, uchar const * buf, u
   ulong dest_cnt = buf_sz;
 
   if( dest_cnt >= MAX_SHRED_DESTS )
-    FD_LOG_ERR( ( "Cluster nodes had %lu destinations, which was more than the max of %lu",
+    FD_LOG_ERR(( "Cluster nodes had %lu destinations, which was more than the max of %lu",
                   dest_cnt,
-                  MAX_SHRED_DESTS ) );
+                  MAX_SHRED_DESTS ));
 
   fd_shred_dest_wire_t const * in_dests = fd_type_pun_const( header );
   fd_shred_dest_weighted_t *   dests    = fd_stake_ci_dest_add_init( ctx->stake_ci );
@@ -118,22 +126,25 @@ during_frag( fd_eqvoc_tile_ctx_t * ctx,
 
   if( FD_UNLIKELY( in_idx == ctx->contact_in_idx ) ) {
     if( FD_UNLIKELY( chunk < ctx->contact_in_chunk0 || chunk > ctx->contact_in_wmark ) ) {
-      FD_LOG_ERR( ( "chunk %lu %lu corrupt, not in range [%lu,%lu]",
+      FD_LOG_ERR(( "chunk %lu %lu corrupt, not in range [%lu,%lu]",
                     chunk,
                     sz,
                     ctx->contact_in_chunk0,
-                    ctx->contact_in_wmark ) );
+                    ctx->contact_in_wmark ));
     }
 
     uchar const * dcache_entry = fd_chunk_to_laddr_const( ctx->contact_in_mem, chunk );
     handle_new_cluster_contact_info( ctx, dcache_entry, sz );
+  } else if( FD_UNLIKELY( in_idx == ctx->gossip_in_idx ) ) {
+    uchar * packet = fd_chunk_to_laddr( ctx->gossip_in_mem, chunk );
+    memcpy( &ctx->duplicate_shred, packet, sizeof(fd_gossip_duplicate_shred_t) );
   } else if ( FD_UNLIKELY( in_idx == ctx->shred_net_in_idx ) ) {
     if( FD_UNLIKELY( chunk < ctx->shred_net_in_chunk0 || chunk > ctx->shred_net_in_wmark ) ) {
-      FD_LOG_ERR( ( "chunk %lu %lu corrupt, not in range [%lu,%lu]",
+      FD_LOG_ERR(( "chunk %lu %lu corrupt, not in range [%lu,%lu]",
                     chunk,
                     sz,
                     ctx->shred_net_in_chunk0,
-                    ctx->shred_net_in_wmark ) );
+                    ctx->shred_net_in_wmark ));
     }
 
     uchar * packet = fd_chunk_to_laddr( ctx->shred_net_in_mem, chunk );
@@ -160,6 +171,9 @@ after_frag( fd_eqvoc_tile_ctx_t * ctx,
   if( FD_UNLIKELY( in_idx == ctx->contact_in_idx ) ) {
     finalize_new_cluster_contact_info( ctx );
     return;
+  } else if ( FD_UNLIKELY( in_idx == ctx->gossip_in_idx ) ) {
+    FD_LOG_NOTICE(( "duplicate shred slot %lu %s", ctx->duplicate_shred.slot, FD_BASE58_ENC_32_ALLOCA( &ctx->duplicate_shred.from ) ));
+    return;
   }
 
   FD_LOG_DEBUG(( "got shred %lu %u", ctx->shred.slot, ctx->shred.idx ));
@@ -176,7 +190,7 @@ privileged_init( fd_topo_t *      topo,
                                                        sizeof( fd_eqvoc_tile_ctx_t ) );
 
   if( FD_UNLIKELY( !strcmp( tile->eqvoc.identity_key_path, "" ) ) )
-    FD_LOG_ERR( ( "identity_key_path not set" ) );
+    FD_LOG_ERR(( "identity_key_path not set" ));
 
   ctx->identity_key[0] = *(fd_pubkey_t const *)
                              fd_type_pun_const( fd_keyload_load( tile->eqvoc.identity_key_path,
@@ -206,6 +220,15 @@ unprivileged_init( fd_topo_t *      topo,
                                                    contact_in_link->dcache,
                                                    contact_in_link->mtu );
 
+  ctx->gossip_in_idx = fd_topo_find_tile_in_link( topo, tile, "gossip_eqvoc", 0 );
+  FD_TEST( ctx->gossip_in_idx != ULONG_MAX );
+  fd_topo_link_t * gossip_in_link = &topo->links[tile->in_link_id[ctx->gossip_in_idx]];
+  ctx->gossip_in_mem = topo->workspaces[topo->objs[gossip_in_link->dcache_obj_id].wksp_id].wksp;
+  ctx->gossip_in_chunk0 = fd_dcache_compact_chunk0( ctx->gossip_in_mem, gossip_in_link->dcache );
+  ctx->gossip_in_wmark  = fd_dcache_compact_wmark( ctx->gossip_in_mem,
+                                                   gossip_in_link->dcache,
+                                                   gossip_in_link->mtu );
+
   ctx->shred_net_in_idx = fd_topo_find_tile_in_link( topo, tile, "shred_net", 0 );
   FD_TEST( ctx->shred_net_in_idx != ULONG_MAX );
   fd_topo_link_t * shred_net_in_link = &topo->links[tile->in_link_id[ctx->shred_net_in_idx]];
@@ -217,10 +240,10 @@ unprivileged_init( fd_topo_t *      topo,
 
   ulong scratch_top = FD_SCRATCH_ALLOC_FINI( l, scratch_align() );
   if( FD_UNLIKELY( scratch_top != (ulong)scratch + scratch_footprint( tile ) ) ) {
-    FD_LOG_ERR( ( "scratch overflow %lu %lu %lu",
+    FD_LOG_ERR(( "scratch overflow %lu %lu %lu",
                   scratch_top - (ulong)scratch - scratch_footprint( tile ),
                   scratch_top,
-                  (ulong)scratch + scratch_footprint( tile ) ) );
+                  (ulong)scratch + scratch_footprint( tile )) );
   }
 }
 

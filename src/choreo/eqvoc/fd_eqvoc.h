@@ -9,14 +9,15 @@
    "proofs" of equivocation.
 
    Equivocation is when the shred producer produces two or more versions
-   of a shred for the same (slot, idx). An equivocation proof comprises
+   of a shred for the same (slot, idx).  An equivocation proof comprises
    a sample of two shreds that conflict in a way that imply the shreds'
    producer equivocated.
 
    The proof can be both direct and indirect (implied). A direct proof
-   is simpler: the proof is generated when you observe two versions of
-   the same shred, ie. two shreds that have the same slot and shred_idx
-   but a different data payload. Indirect
+   contains two shreds with the same slot and shred_idx but different
+   data payloads.  An indirect proof contains two shreds with the same
+   slot but different shred_idxs, and the metadata on the shreds implies
+   there must be two or more versions of a block for that slot.
 
    The following lists the equivocation cases:
 

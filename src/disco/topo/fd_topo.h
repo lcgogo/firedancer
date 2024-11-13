@@ -239,6 +239,7 @@ typedef struct {
       char  status_cache[ PATH_MAX ];
       ulong tpool_thread_count;
       char  cluster_version[ 32 ];
+      ulong snapshot_interval;
 
       /* not specified by [tiles.replay] */
 
@@ -335,9 +336,10 @@ typedef struct {
     } rpcserv;
 
     struct {
-      ulong slot;
+      ulong interval;
       char  out_dir[ PATH_MAX ];
     } snaps;
+
   };
 } fd_topo_tile_t;
 

@@ -4,22 +4,23 @@
 
 #include "../../../../disco/tiles.h"
 
-#include "../../../../disco/fd_disco.h"
-#include "../../../../flamenco/gossip/fd_gossip.h"
-#include "../../../../disco/keyguard/fd_keyload.h"
-#include "../../../../disco/store/util.h"
-#include "../../../../flamenco/runtime/fd_system_ids.h"
-#include "../../../../util/fd_util.h"
-#include "../../../../util/net/fd_eth.h"
-#include "../../../../util/net/fd_ip4.h"
-#include "../../../../util/net/fd_udp.h"
-#include "../../../../util/net/fd_net_headers.h"
+#include "../../../../disco/topo/fd_pod_format.h"
+#include "../../../../funk/fd_funk.h"
+#include "../../../../flamenco/runtime/fd_txncache.h"
+#include "../../../../flamenco/runtime/fd_runtime.h"
+#include "../../../../flamenco/snapshot/fd_snapshot_create.h"
 
-#define PACKET_DATA_SIZE 1232
+#define SCRATCH_MAX    (1024UL /*MiB*/ << 21)
+#define SCRATCH_DEPTH  (128UL) /* 128 scratch frames */
 
 struct fd_snapshot_tile_ctx {
-  ulong        slot;
-  char const * out_dir;
+  ulong           interval;
+  char const    * out_dir;
+  fd_funk_t     * funk;
+  fd_txncache_t * status_cache;
+  fd_wksp_t     * status_cache_wksp;
+  ulong         * smr;
+  ulong         * is_constipated;
 };
 typedef struct fd_snapshot_tile_ctx fd_snapshot_tile_ctx_t;
 
@@ -28,47 +29,13 @@ scratch_align( void ) {
   return 128UL;
 }
 
-
 FD_FN_PURE static inline ulong
 scratch_footprint( fd_topo_tile_t const * tile FD_PARAM_UNUSED ) {
   ulong l = FD_LAYOUT_INIT;
   l = FD_LAYOUT_APPEND( l, alignof(fd_snapshot_tile_ctx_t), sizeof(fd_snapshot_tile_ctx_t) );
+  l = FD_LAYOUT_APPEND( l, fd_scratch_smem_align(), fd_scratch_smem_footprint( SCRATCH_MAX   ) );
+  l = FD_LAYOUT_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   return FD_LAYOUT_FINI( l, scratch_align() );
-}
-
-static inline int
-before_frag( fd_snapshot_tile_ctx_t * ctx    FD_PARAM_UNUSED,
-             ulong                    in_idx FD_PARAM_UNUSED,
-             ulong                    seq    FD_PARAM_UNUSED,
-             ulong                    sig    FD_PARAM_UNUSED ) {
-
-  FD_LOG_WARNING(("UNIMPLEMENTED"));
-  return 0;
-}
-
-static void
-during_frag( fd_snapshot_tile_ctx_t * ctx    FD_PARAM_UNUSED,
-             ulong                    in_idx FD_PARAM_UNUSED,
-             ulong                    seq    FD_PARAM_UNUSED,
-             ulong                    sig    FD_PARAM_UNUSED,
-             ulong                    chunk  FD_PARAM_UNUSED,
-             ulong                    sz     FD_PARAM_UNUSED ) {
-  
-  FD_LOG_WARNING(("UNIMPLEMENTED"));
-  return;
-}
-
-static void
-after_frag( fd_snapshot_tile_ctx_t *  ctx    FD_PARAM_UNUSED,
-            ulong                     in_idx FD_PARAM_UNUSED,
-            ulong                     seq    FD_PARAM_UNUSED,
-            ulong                     sig    FD_PARAM_UNUSED,
-            ulong                     chunk  FD_PARAM_UNUSED,
-            ulong                     sz     FD_PARAM_UNUSED,
-            ulong                     tsorig FD_PARAM_UNUSED,
-            fd_stem_context_t *       stem   FD_PARAM_UNUSED ) {
-  FD_LOG_WARNING(("UNIMPLEMENTED"));
-  return;
 }
 
 static void
@@ -82,8 +49,121 @@ privileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
 static void
 unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
                    fd_topo_tile_t * tile FD_PARAM_UNUSED ) {
-  FD_LOG_WARNING(("UNIMPLEMENTED"));
-  return;
+
+
+  void * scratch = fd_topo_obj_laddr( topo, tile->tile_obj_id );
+
+  /**********************************************************************/
+  /* scratch (bump)-allocate memory owned by the replay tile            */
+  /**********************************************************************/
+
+  /* Do not modify order! This is join-order in unprivileged_init. */
+
+  FD_SCRATCH_ALLOC_INIT( l, scratch );
+  fd_snapshot_tile_ctx_t * ctx = FD_SCRATCH_ALLOC_APPEND( l, alignof(fd_snapshot_tile_ctx_t), sizeof(fd_snapshot_tile_ctx_t) );
+  memset( ctx, 0, sizeof(fd_snapshot_tile_ctx_t) );
+  void * scratch_smem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_smem_align(), fd_scratch_smem_footprint( SCRATCH_MAX    ) );
+  void * scratch_fmem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
+  ulong  scratch_alloc_mem   = FD_SCRATCH_ALLOC_FINI  ( l, scratch_align() );
+
+  ctx->interval = tile->snaps.interval;
+  ctx->out_dir  = tile->snaps.out_dir;
+
+  /**********************************************************************/
+  /* funk                                                               */
+  /**********************************************************************/
+
+  ulong funk_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "funk" );
+  FD_TEST( funk_obj_id!=ULONG_MAX );
+  ctx->funk = fd_funk_join( fd_topo_obj_laddr( topo, funk_obj_id ) );
+  if( ctx->funk==NULL ) {
+    FD_LOG_ERR(( "no funk" ));
+  }
+
+  /**********************************************************************/
+  /* status cache                                                       */
+  /**********************************************************************/
+
+  ulong status_cache_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "txncache" );
+  FD_TEST( status_cache_obj_id!=ULONG_MAX );
+  ctx->status_cache = fd_txncache_join( fd_topo_obj_laddr( topo, status_cache_obj_id ) );
+  if( ctx->funk==NULL ) {
+    FD_LOG_ERR(( "no funk" ));
+  }
+
+  /**********************************************************************/
+  /* scratch                                                            */
+  /**********************************************************************/
+
+  fd_scratch_attach( scratch_smem, scratch_fmem, SCRATCH_MAX, SCRATCH_DEPTH );
+
+  if( FD_UNLIKELY( scratch_alloc_mem != ( (ulong)scratch + scratch_footprint( tile ) ) ) ) {
+    FD_LOG_ERR( ( "scratch_alloc_mem did not match scratch_footprint diff: %lu alloc: %lu footprint: %lu",
+          scratch_alloc_mem - (ulong)scratch - scratch_footprint( tile ),
+          scratch_alloc_mem,
+          (ulong)scratch + scratch_footprint( tile ) ) );
+  }
+
+  /**********************************************************************/
+  /*  root_slot fseq                                                    */
+  /**********************************************************************/
+
+  ulong root_slot_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "root_slot" );
+  FD_TEST( root_slot_obj_id!=ULONG_MAX );
+  ctx->smr = fd_fseq_join( fd_topo_obj_laddr( topo, root_slot_obj_id ) );
+  if( FD_UNLIKELY( !ctx->smr ) ) {
+    FD_LOG_ERR(( "replay tile has no root_slot fseq" ));
+  }
+  FD_TEST( ULONG_MAX==fd_fseq_query( ctx->smr ) );
+
+  /**********************************************************************/
+  /*  constipated fseq                                                  */
+  /**********************************************************************/
+
+  ulong constipated_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "constipate" );
+  FD_TEST( constipated_obj_id!=ULONG_MAX );
+  ctx->is_constipated = fd_fseq_join( fd_topo_obj_laddr( topo, constipated_obj_id ) );
+  if( FD_UNLIKELY( !ctx->is_constipated ) ) {
+    FD_LOG_ERR(( "replay tile has no constipated fseq" ));
+  }
+  fd_fseq_update( ctx->is_constipated, 0UL );
+  FD_TEST( 0UL==fd_fseq_query( ctx->is_constipated ) );
+  FD_LOG_WARNING(("SET TO ZERO"));
+
+}
+
+static void
+after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
+              fd_stem_context_t *      stem        FD_PARAM_UNUSED,
+              int *                    opt_poll_in FD_PARAM_UNUSED,
+              int *                    charge_busy FD_PARAM_UNUSED ) {
+    
+  ulong is_constipated = fd_fseq_query( ctx->is_constipated );
+
+  if( FD_UNLIKELY( is_constipated ) ) {
+
+    FD_LOG_WARNING(("STARTING TO CREATE A NEW SNAPSHOT"));
+
+    uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
+
+    fd_snapshot_ctx_t snapshot_ctx = {
+      .slot           = is_constipated,
+      .out_dir        = ctx->out_dir,
+      .is_incremental = 0,
+      .valloc         = fd_scratch_virtual(),
+      .acc_mgr        = fd_acc_mgr_new( mem, ctx->funk ),
+      .status_cache   = ctx->status_cache,
+    };
+
+    FD_TEST( 0 == fd_snapshot_create_new_snapshot( &snapshot_ctx ) );
+
+    fd_fseq_update( ctx->is_constipated, 0UL );
+
+
+    FD_LOG_ERR(("DONE CREATING A NEW SNAPSHOT"));
+
+  }
+
 }
 
 static ulong
@@ -92,7 +172,8 @@ populate_allowed_fds( fd_topo_t const *      topo        FD_PARAM_UNUSED,
                       ulong                  out_fds_cnt FD_PARAM_UNUSED,
                       int *                  out_fds     FD_PARAM_UNUSED ) {
 
-  FD_LOG_WARNING(("UNIMPLEMENTED"));
+  FD_LOG_WARNING(("POPULATE ALLOWED FDS" ));
+
   return 0;
 }
 
@@ -101,14 +182,12 @@ populate_allowed_fds( fd_topo_t const *      topo        FD_PARAM_UNUSED,
 #define STEM_CALLBACK_CONTEXT_TYPE          fd_snapshot_tile_ctx_t
 #define STEM_CALLBACK_CONTEXT_ALIGN alignof(fd_snapshot_tile_ctx_t)
 
-#define STEM_CALLBACK_BEFORE_FRAG  before_frag
-#define STEM_CALLBACK_DURING_FRAG  during_frag
-#define STEM_CALLBACK_AFTER_FRAG   after_frag
+#define STEM_CALLBACK_AFTER_CREDIT        after_credit
 
 #include "../../../../disco/stem/fd_stem.c"
 
-fd_topo_run_tile_t fd_tile_gossip_verify = {
-  .name                     = "gspvfy",
+fd_topo_run_tile_t fd_tile_snaps = {
+  .name                     = "snaps",
   .populate_allowed_fds     = populate_allowed_fds,
   .scratch_align            = scratch_align,
   .scratch_footprint        = scratch_footprint,

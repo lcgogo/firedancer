@@ -14,6 +14,7 @@
 #include "../../../waltz/xdp/fd_xdp1.h"
 #include "../../../flamenco/runtime/fd_blockstore.h"
 #include "../../../flamenco/runtime/fd_txncache.h"
+#include "../../../funk/fd_funk_filemap.h"
 #include "../../../funk/fd_funk.h"
 #include "../configure/configure.h"
 
@@ -539,6 +540,7 @@ fdctl_obj_new( fd_topo_t const *     topo,
   } else if( FD_UNLIKELY( !strcmp( obj->name, "blockstore" ) ) ) {
     fd_blockstore_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("shred_max"), VAL("slot_max"), VAL("lg_txn_max") );
   } else if( FD_UNLIKELY( !strcmp( obj->name, "funk" ) ) ) {
+    FD_LOG_WARNING(("CREATING A NEW FUNK"));
     fd_funk_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("txn_max"), VAL("rec_max") );
   } else if( FD_UNLIKELY( !strcmp( obj->name, "txncache" ) ) ) {
     fd_txncache_new( laddr, VAL("max_rooted_slots"), VAL("max_live_slots"), VAL("max_txn_per_slot"), 0UL );

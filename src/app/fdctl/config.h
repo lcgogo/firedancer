@@ -295,7 +295,7 @@ typedef struct {
     struct {
       ulong interval;
       char  out_dir[ PATH_MAX ];
-    } snapshot;
+    } snaps;
 
   } tiles;
 } config_t;

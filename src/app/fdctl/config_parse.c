@@ -380,8 +380,8 @@ fdctl_pod_to_cfg( config_t * config,
   CFG_POP      ( cstr,   tiles.store_int.shred_cap_archive                );
   CFG_POP      ( cstr,   tiles.store_int.shred_cap_replay                 );
 
-  CFG_POP      ( ulong, tiles.snapshot.interval                           );
-  CFG_POP      ( cstr,  tiles.snapshot.out_dir                            );
+  CFG_POP      ( ulong, tiles.snaps.interval                              );
+  CFG_POP      ( cstr,  tiles.snaps.out_dir                               );
 
 # undef CFG_POP
 # undef CFG_ARRAY

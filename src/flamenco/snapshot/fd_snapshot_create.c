@@ -533,7 +533,7 @@ fd_snapshot_create_setup_and_validate_ctx( fd_snapshot_ctx_t * snapshot_ctx ) {
   /* Now the slot bank */
 
   fd_funk_rec_key_t     slot_id  = fd_runtime_slot_bank_key();
-  fd_funk_rec_t const * slot_rec = fd_funk_rec_query_global( funk, NULL, &slot_id, NULL );
+  fd_funk_rec_t const * slot_rec = fd_funk_rec_query( funk, NULL, &slot_id );
   if( FD_UNLIKELY( !slot_rec ) ) {
     FD_LOG_WARNING(( "Failed to read slot bank record: missing record" ));
     return -1;
@@ -797,7 +797,7 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
     goto cleanup;
   }
 
-  fd_zstd = open( directory_buf_zstd, O_WRONLY | O_CREAT | O_TRUNC, 0644 );
+  fd_zstd = open( directory_buf_zstd, O_WRONLY | O_CREAT | O_TRUNC );
   if( FD_UNLIKELY( fd_zstd==-1 ) ) {
     FD_LOG_WARNING(( "Failed to open the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
     err = -1;

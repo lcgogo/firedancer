@@ -54,6 +54,35 @@ setup_topo_txncache( fd_topo_t *  topo,
   return obj;
 }
 
+static fd_topo_obj_t *
+setup_topo_funk( fd_topo_t *  topo,
+                 char const * wksp_name, 
+                 ulong        funk_rec_max,
+                 ulong        funk_sz_gb,
+                 ulong        funk_txn_max ) {
+
+  fd_topo_obj_t * obj = fd_topob_obj( topo, "funk", wksp_name );
+
+  ulong seed;
+  FD_TEST( sizeof(ulong) == getrandom( &seed, sizeof(ulong), 0 ) );
+
+  ulong loose_sz = funk_sz_gb * 1000000000;
+  FD_LOG_WARNING(("LOOSE SZ %lu", loose_sz));
+
+  FD_TEST( fd_pod_insertf_ulong( topo->props, 2UL,          "obj.%lu.wksp_tag",   obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, seed,         "obj.%lu.seed",       obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_rec_max, "obj.%lu.rec_max", obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_sz_gb,   "obj.%lu.sz_gb",   obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_txn_max, "obj.%lu.txn_max", obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, loose_sz,     "obj.%lu.loose",      obj->id ) );
+
+
+  FD_LOG_WARNING(("REC MAX TXN MAX %lu %lu", funk_rec_max, funk_txn_max));
+
+  return obj;
+
+}
+
 void
 fd_topo_initialize( config_t * config ) {
   ulong net_tile_cnt    = config->layout.net_tile_count;
@@ -107,7 +136,6 @@ fd_topo_initialize( config_t * config ) {
   fd_topob_wksp( topo, "store_replay" );
   fd_topob_wksp( topo, "replay_poh"   );
   fd_topob_wksp( topo, "replay_notif" );
-  fd_topob_wksp( topo, "replay_snaps" );
   fd_topob_wksp( topo, "bank_busy"    );
   fd_topob_wksp( topo, "root_slot"    );
   fd_topob_wksp( topo, "pack_replay"  );
@@ -137,7 +165,10 @@ fd_topo_initialize( config_t * config ) {
   fd_topob_wksp( topo, "voter"      );
   fd_topob_wksp( topo, "poh_slot"   );
   fd_topob_wksp( topo, "eqvoc"      );
+  fd_topob_wksp( topo, "funkspace"  );
   fd_topob_wksp( topo, "snaps"      );
+  fd_topob_wksp( topo, "constipate" );
+
 
   if( enable_rpc ) fd_topob_wksp( topo, "rpcsrv" );
 
@@ -186,7 +217,6 @@ fd_topo_initialize( config_t * config ) {
   /**/                 fd_topob_link( topo, "pack_replay",  "pack_replay",  0,        65536UL,                                  USHORT_MAX,                    1UL   );
   /**/                 fd_topob_link( topo, "poh_pack",     "replay_poh",   0,        128UL,                                    sizeof(fd_became_leader_t) ,   1UL   );
   /**/                 fd_topob_link( topo, "poh_replay",   "poh_replay",   0,        128UL,                                    USHORT_MAX,                    1UL   ); /* TODO: not properly sized yet */
-  /**/                 fd_topob_link( topo, "replay_snaps", "replay_snaps", 0,        128UL,                                    2048UL,                        1UL   );
   /**/                 fd_topob_link( topo, "replay_voter", "replay_voter", 0,        128UL,                                    FD_TPU_DCACHE_MTU,             1UL   );
   /**/                 fd_topob_link( topo, "voter_gossip", "voter_gossip", 0,        128UL,                                    FD_TXN_MTU,                    1UL   );
   /**/                 fd_topob_link( topo, "voter_sign",   "voter_sign",   0,        128UL,                                    FD_TXN_MTU,                    1UL   );
@@ -254,13 +284,14 @@ fd_topo_initialize( config_t * config ) {
     fd_topob_tile_uses( topo, rpcserv_tile, blockstore_obj, FD_SHMEM_JOIN_MODE_READ_ONLY );
   }
 
+  FD_TEST( fd_pod_insertf_ulong( topo->props, blockstore_obj->id, "blockstore" ) );
+
   /* Create a shared funk to be used by replay and snapshot. */
-  // TODO:FIXME: fd_tobo_obj_t * funk_obj = setup_topo_funk( topo, "funk", FD_FUNK_MAX, FD_FUNK_MAX )
-  fd_topo_obj_t * funk_obj = NULL;
+  fd_topo_obj_t * funk_obj = setup_topo_funk( topo, "funkspace", config->tiles.replay.funk_rec_max, config->tiles.replay.funk_sz_gb, config->tiles.replay.funk_txn_max );
   fd_topob_tile_uses( topo, replay_tile, funk_obj, FD_SHMEM_JOIN_MODE_READ_WRITE );
   fd_topob_tile_uses( topo, snaps_tile,  funk_obj, FD_SHMEM_JOIN_MODE_READ_ONLY );
 
-  FD_TEST( fd_pod_insertf_ulong( topo->props, blockstore_obj->id, "blockstore" ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_obj->id, "funk" ) );
 
   /* Create a txncache to be used by replay. */
   fd_topo_obj_t * txncache_obj = setup_topo_txncache( topo, "tcache", FD_TXNCACHE_DEFAULT_MAX_ROOTED_SLOTS, FD_TXNCACHE_DEFAULT_MAX_LIVE_SLOTS, MAX_CACHE_TXNS_PER_SLOT );
@@ -289,7 +320,7 @@ fd_topo_initialize( config_t * config ) {
   fd_topo_obj_t * root_slot_obj = fd_topob_obj( topo, "fseq", "root_slot" );
   fd_topob_tile_uses( topo, replay_tile, root_slot_obj, FD_SHMEM_JOIN_MODE_READ_WRITE );
   fd_topob_tile_uses( topo, store_tile,  root_slot_obj, FD_SHMEM_JOIN_MODE_READ_ONLY  );
-  fd_topob_tile_uses( topo, snaps_tile,  root_slot_obj, FD_SHMEM_JOIN_MODE_READ_ONLY  );
+  fd_topob_tile_uses( topo, snaps_tile,  root_slot_obj, FD_SHMEM_JOIN_MODE_READ_ONLY  ); 
   FD_TEST( fd_pod_insertf_ulong( topo->props, root_slot_obj->id, "root_slot" ) );
 
   for( ulong i=0UL; i<shred_tile_cnt; i++ ) {
@@ -304,6 +335,11 @@ fd_topo_initialize( config_t * config ) {
   fd_topob_tile_uses( topo, sender_tile, poh_slot_obj, FD_SHMEM_JOIN_MODE_READ_ONLY );
   fd_topob_tile_uses( topo, replay_tile, poh_slot_obj, FD_SHMEM_JOIN_MODE_READ_ONLY );
   FD_TEST( fd_pod_insertf_ulong( topo->props, poh_slot_obj->id, "poh_slot" ) );
+
+  fd_topo_obj_t * constipated_obj = fd_topob_obj( topo, "fseq", "constipate" );
+  fd_topob_tile_uses( topo, replay_tile, constipated_obj, FD_SHMEM_JOIN_MODE_READ_WRITE );
+  fd_topob_tile_uses( topo, snaps_tile,  constipated_obj, FD_SHMEM_JOIN_MODE_READ_WRITE );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, constipated_obj->id, "constipate" ) );
 
   if( FD_LIKELY( !is_auto_affinity ) ) {
     if( FD_UNLIKELY( affinity_tile_cnt<topo->tile_cnt ) )
@@ -563,6 +599,7 @@ fd_topo_initialize( config_t * config ) {
       }
       strncpy( tile->replay.cluster_version, config->tiles.replay.cluster_version, sizeof(tile->replay.cluster_version) );
       tile->replay.bank_tile_count = config->layout.bank_tile_count;
+      tile->replay.snapshot_interval = config->tiles.snaps.interval;
 
       /* not specified by [tiles.replay] */
 
@@ -617,6 +654,9 @@ fd_topo_initialize( config_t * config ) {
       tile->rpcserv.tpu_port = config->tiles.quic.regular_transaction_listen_port;
       tile->rpcserv.tpu_ip_addr = config->tiles.net.ip_addr;
       strncpy( tile->rpcserv.identity_key_path, config->consensus.identity_path, sizeof(tile->rpcserv.identity_key_path) );
+    } else if( FD_UNLIKELY( !strcmp( tile->name, "snaps" ) ) ) {
+      tile->snaps.interval = config->tiles.snaps.interval;
+      strncpy( tile->snaps.out_dir, config->tiles.snaps.out_dir, sizeof(tile->snaps.out_dir) );
     } else {
       FD_LOG_ERR(( "unknown tile name %lu `%s`", i, tile->name ));
     }

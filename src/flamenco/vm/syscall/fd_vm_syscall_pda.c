@@ -36,30 +36,47 @@ fd_vm_derive_pda( fd_vm_t *           vm,
   fd_vm_vec_t const * seeds_haddr = FD_VM_MEM_SLICE_HADDR_LD( vm, seeds_vaddr, FD_VM_ALIGN_RUST_SLICE_U8_REF,
     fd_ulong_sat_mul( seeds_cnt, FD_VM_VEC_SIZE ) );
 
-  if ( seeds_cnt>FD_VM_PDA_SEEDS_MAX ) {
+  /* This is a preflight check that is performed in Agave before deriving PDAs but after checking the seeds vaddr. 
+     Weirdly they do two checks for seeds cnt - one before PDA derivation, and one during. The first check will
+     fail the preflight checks, and the second should just continue execution. We can't put this check one level up
+     because it's only done after haddr conversion / alignment / size checks, which is done by the above line. We
+     also can't rely on just the second check because we need execution to halt. 
+     https://github.com/anza-xyz/agave/blob/v2.1.0/programs/bpf_loader/src/syscalls/mod.rs#L728-L730 */
+  if( FD_UNLIKELY( seeds_cnt>FD_VM_PDA_SEEDS_MAX ) ) {
     FD_VM_ERR_FOR_LOG_SYSCALL( vm, FD_VM_ERR_SYSCALL_BAD_SEEDS );
     return FD_VM_ERR_INVAL;
+  }
+
+  /* This check does NOT halt execution within `fd_vm_syscall_sol_try_find_program_address`. This means
+     that if the user provides 16 seeds (excluding the bump) in the `try_find_program_address` syscall, 
+     this same check below will be hit 255 times and deduct that many CUs. Very strange... 
+     https://github.com/anza-xyz/agave/blob/v2.1.0/sdk/pubkey/src/lib.rs#L725-L727 */
+  if( FD_UNLIKELY( seeds_cnt+( !!bump_seed )>FD_VM_PDA_SEEDS_MAX ) ) {
+    return FD_VM_ERR_INVALID_PDA;
   }
 
   fd_sha256_init( vm->sha );
   for ( ulong i=0UL; i<seeds_cnt; i++ ) {
     ulong seed_sz = seeds_haddr[i].len;
 
+    /* Another preflight check 
+       https://github.com/anza-xyz/agave/blob/v2.1.0/programs/bpf_loader/src/syscalls/mod.rs#L734-L736 */
     if( FD_UNLIKELY( seed_sz>FD_VM_PDA_SEED_MEM_MAX ) ) {
       FD_VM_ERR_FOR_LOG_SYSCALL( vm, FD_VM_ERR_SYSCALL_BAD_SEEDS );
       return FD_VM_ERR_INVAL;
     }
 
     /* If the seed length is 0, then we don't need to append anything. solana_bpf_loader_program::syscalls::translate_slice
-       returns an empty array in host space when given an empty array, which means this seed will have no affect on the PDA. */
+       returns an empty array in host space when given an empty array, which means this seed will have no affect on the PDA. 
+       https://github.com/anza-xyz/agave/blob/v2.1.0/programs/bpf_loader/src/syscalls/mod.rs#L737-L742 */
     if ( FD_UNLIKELY( seed_sz==0 ) ) {
       continue;
     }
-
     void const * seed_haddr = FD_VM_MEM_SLICE_HADDR_LD( vm, seeds_haddr[i].addr, FD_VM_ALIGN_RUST_U8, seed_sz );
     fd_sha256_append( vm->sha, seed_haddr, seed_sz );
   }
 
+  /* https://github.com/anza-xyz/agave/blob/v2.1.0/sdk/pubkey/src/lib.rs#L738-L747 */
   if( bump_seed ) {
     fd_sha256_append( vm->sha, bump_seed, 1UL );
   }
@@ -178,15 +195,33 @@ fd_vm_syscall_sol_try_find_program_address( void *  _vm,
      CALLS TO SHA TO SUPPORT THIS)*/
 
   uchar bump_seed[1];
-  for ( ulong i=0UL; i<255UL; i++ ) {
+
+  /* Agave performs preflight checks on the seed lengths and translation before doing any
+     derivation and deducting CUs, whereas we do it on the fly in a single iteration. 
+     To maintain CU conformance at a fuzzing level, we should perform the CU deduction only if 
+     our adjacent preflight checks do not fail. If they do at some point in the derivation,
+     no extra CUs will be charged. */
+  ulong owed_cus = 0UL;
+  for( ulong i=0UL; i<255UL; i++ ) {
     bump_seed[0] = (uchar)(255UL - i);
 
     fd_pubkey_t derived[1];
     int err = fd_vm_derive_pda( vm, NULL, program_id_vaddr, seeds_vaddr, seeds_cnt, bump_seed, derived );
-    if ( FD_LIKELY( err == FD_VM_SUCCESS ) ) {
+    if( FD_LIKELY( err==FD_VM_SUCCESS ) ) {
       /* Stop looking if we have found a valid PDA */
-      fd_pubkey_t * out_haddr = FD_VM_MEM_HADDR_ST( vm, out_vaddr, FD_VM_ALIGN_RUST_U8, sizeof(fd_pubkey_t) );
-      uchar * out_bump_seed_haddr = FD_VM_MEM_HADDR_ST( vm, out_bump_seed_vaddr, FD_VM_ALIGN_RUST_U8, 1UL );
+      int err = 0;
+      fd_pubkey_t * out_haddr = FD_VM_MEM_HADDR_ST_( vm, out_vaddr, FD_VM_ALIGN_RUST_U8, sizeof(fd_pubkey_t), &err );
+      if( FD_UNLIKELY( 0 != err ) ) {
+        FD_VM_CU_UPDATE( vm, owed_cus );
+        *_ret = 0UL;
+        return err;
+      }
+      uchar * out_bump_seed_haddr = FD_VM_MEM_HADDR_ST_( vm, out_bump_seed_vaddr, FD_VM_ALIGN_RUST_U8, 1UL, &err );
+      if( FD_UNLIKELY( 0 != err ) ) {
+        FD_VM_CU_UPDATE( vm, owed_cus );
+        *_ret = 0UL;
+        return err;
+      }
 
       /* Do the overlap check, which is only included for this syscall */
       FD_VM_MEM_CHECK_NON_OVERLAPPING( vm, out_vaddr, 32UL, out_bump_seed_vaddr, 1UL );
@@ -194,16 +229,18 @@ fd_vm_syscall_sol_try_find_program_address( void *  _vm,
       memcpy( out_haddr, derived, sizeof(fd_pubkey_t) );
       *out_bump_seed_haddr = (uchar)*bump_seed;
 
+      FD_VM_CU_UPDATE( vm, owed_cus );
+
       *_ret = 0UL;
       return FD_VM_SUCCESS;
-    } else if ( FD_UNLIKELY( err != FD_VM_ERR_INVALID_PDA ) ) {
-      /* FD_VM_ERR_INVALID_PDA continue the loop, any other error return */
+    } else if( FD_UNLIKELY( err!=FD_VM_ERR_INVALID_PDA ) ) {
       return err;
     }
 
-    FD_VM_CU_UPDATE( vm, FD_VM_CREATE_PROGRAM_ADDRESS_UNITS );
-
+    owed_cus = fd_ulong_sat_add( owed_cus, FD_VM_CREATE_PROGRAM_ADDRESS_UNITS );
   }
+
+  FD_VM_CU_UPDATE( vm, owed_cus );
 
   *_ret = 1UL;
   return FD_VM_SUCCESS;

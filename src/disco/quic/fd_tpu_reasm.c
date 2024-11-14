@@ -33,6 +33,7 @@ fd_tpu_reasm_new( void * shmem,
   /* Memory layout */
 
   ulong slot_cnt = depth+burst;
+  if( FD_UNLIKELY( !slot_cnt ) ) return NULL;
 
   FD_SCRATCH_ALLOC_INIT( l, shmem );
   fd_tpu_reasm_t *      reasm     = FD_SCRATCH_ALLOC_APPEND( l, alignof(fd_tpu_reasm_t), sizeof(fd_tpu_reasm_t) );
@@ -115,6 +116,21 @@ fd_tpu_reasm_delete( void * shreasm ) {
   return shreasm;
 }
 
+FD_FN_CONST ulong
+fd_tpu_reasm_chunk0( fd_tpu_reasm_t const * reasm,
+                     void const *           base ) {
+  return fd_laddr_to_chunk( base, slot_get_data_const( reasm, 0UL ) );
+}
+
+
+FD_FN_CONST ulong
+fd_tpu_reasm_wmark( fd_tpu_reasm_t const * reasm,
+                    void const *           base ) {
+  /* U.B. if slot_cnt==0, but this is checked in fd_tpu_reasm_new */
+  return fd_laddr_to_chunk( base, slot_get_data_const( reasm, reasm->slot_cnt - 1UL ) );
+}
+
+
 fd_tpu_reasm_slot_t *
 fd_tpu_reasm_prepare( fd_tpu_reasm_t * reasm,
                       ulong            tsorig ) {
@@ -181,8 +197,7 @@ fd_tpu_reasm_publish( fd_tpu_reasm_t *      reasm,
   uint    slot_idx      = slot_get_idx( reasm, slot );
   uchar * data          = slot_get_data( reasm, slot_idx );
   ulong   data_laddr    = (ulong)data;
-  ulong   data_rel_addr = data_laddr - (ulong)base;
-  ulong   chunk         = data_rel_addr >> FD_CHUNK_LG_SZ;
+  ulong   chunk         = fd_laddr_to_chunk( base, (void *)data_laddr );
   if( FD_UNLIKELY( ( data_laddr<(ulong)base ) |
                    ( chunk>UINT_MAX         ) ) ) {
     FD_LOG_CRIT(( "invalid base %p for slot %p in tpu_reasm %p",
@@ -190,12 +205,11 @@ fd_tpu_reasm_publish( fd_tpu_reasm_t *      reasm,
   }
 
   /* Acquire mcache line */
-  ulong            depth    = reasm->depth;
-  fd_frag_meta_t * meta     = mcache + fd_mcache_line_idx( seq, depth );
+  ulong  depth          = reasm->depth;
 
   /* Detect which slot this message belongs to */
-  uint *           pub_slot       = fd_tpu_reasm_pub_slots_laddr( reasm ) + fd_mcache_line_idx( seq, depth );
-  uint             freed_slot_idx = *pub_slot;
+  uint * pub_slot       = fd_tpu_reasm_pub_slots_laddr( reasm ) + fd_mcache_line_idx( seq, depth );
+  uint   freed_slot_idx = *pub_slot;
 
   if( FD_UNLIKELY( freed_slot_idx >= reasm->slot_cnt ) ) {
     /* mcache corruption */
@@ -228,6 +242,12 @@ fd_tpu_reasm_publish( fd_tpu_reasm_t *      reasm,
   ulong ctl    = fd_frag_meta_ctl( reasm->orig, 1, 1, 0 );
   ulong tsorig = slot->tsorig;
 
+# if FD_HAS_AVX
+  fd_mcache_publish_avx( mcache, depth, seq, 0UL, chunk, sz, ctl, tsorig, tspub );
+# elif FD_HAS_SSE
+  fd_mcache_publish_sse( mcache, depth, seq, 0UL, chunk, sz, ctl, tsorig, tspub );
+# else
+  fd_frag_meta_t * meta = mcache + fd_mcache_line_idx( seq, depth );
   FD_COMPILER_MFENCE();
   meta->seq    = fd_seq_dec( seq, 1UL );
   FD_COMPILER_MFENCE();
@@ -239,6 +259,7 @@ fd_tpu_reasm_publish( fd_tpu_reasm_t *      reasm,
   FD_COMPILER_MFENCE();
   meta->seq    = seq;
   FD_COMPILER_MFENCE();
+# endif
 
   return FD_TPU_REASM_SUCCESS;
 }

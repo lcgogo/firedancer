@@ -996,7 +996,7 @@ fd_runtime_pre_execute_check( fd_execute_txn_task_info_t * task_info ) {
 
   /* Post-sanitization checks. Called from `prepare_sanitized_batch()` which, for now, only is used
      to lock the accounts and perform a couple basic validations.
-     https://github.com/anza-xyz/agave/blob/v2.0.9/sdk/src/transaction/sanitized.rs#L277-L289 */
+     https://github.com/anza-xyz/agave/blob/838c1952595809a31520ff1603a13f2c9123aa51/accounts-db/src/account_locks.rs#L118 */
   err = fd_executor_validate_account_locks( txn_ctx );
   if( FD_UNLIKELY( err!=FD_RUNTIME_EXECUTE_SUCCESS ) ) {
     task_info->txn->flags = 0U;
@@ -1338,7 +1338,7 @@ fd_runtime_write_transaction_status( fd_capture_ctx_t * capture_ctx,
   /* Look up solana-side transaction status details */
   fd_blockstore_t * blockstore = txn_ctx->slot_ctx->blockstore;
   uchar * sig = (uchar *)txn_ctx->_txn_raw->raw + txn_ctx->txn_descriptor->signature_off;
-  fd_blockstore_txn_map_t * txn_map_entry = fd_blockstore_txn_query( blockstore, sig );
+  fd_txn_map_t * txn_map_entry = fd_blockstore_txn_query( blockstore, sig );
   if ( txn_map_entry != NULL ) {
     void * meta = fd_wksp_laddr_fast( fd_blockstore_wksp( blockstore ), txn_map_entry->meta_gaddr );
 
@@ -1447,7 +1447,7 @@ fd_runtime_finalize_txn( fd_exec_slot_ctx_t *         slot_ctx,
     fd_acc_mgr_view( txn_ctx->acc_mgr, txn_ctx->funk_txn, &txn_ctx->accounts[0], borrowed_account );
     memcpy( borrowed_account->pubkey->key, &txn_ctx->accounts[0], sizeof(fd_pubkey_t) );
 
-    void * borrowed_account_data = fd_spad_alloc( txn_ctx->spad, FD_SPAD_ALIGN, FD_ACC_TOT_SZ_MAX );
+    void * borrowed_account_data = fd_spad_alloc( txn_ctx->spad, FD_ACCOUNT_REC_ALIGN, FD_ACC_TOT_SZ_MAX );
     fd_borrowed_account_make_modifiable( borrowed_account, borrowed_account_data );
     borrowed_account->meta->info.lamports -= (txn_ctx->execution_fee + txn_ctx->priority_fee);
 
@@ -1691,8 +1691,8 @@ fd_runtime_finalize_txns_update_blockstore_meta( fd_exec_slot_ctx_t *         sl
 
   fd_blockstore_t * blockstore      = slot_ctx->blockstore;
   fd_wksp_t * blockstore_wksp       = fd_blockstore_wksp( blockstore );
-  fd_alloc_t * blockstore_alloc     = fd_wksp_laddr_fast( blockstore_wksp, blockstore->alloc_gaddr );
-  fd_blockstore_txn_map_t * txn_map = fd_wksp_laddr_fast( blockstore_wksp, blockstore->txn_map_gaddr );
+  fd_alloc_t * blockstore_alloc     = blockstore->alloc;
+  fd_txn_map_t * txn_map = blockstore->txn_map;
 
   /* Get the total size of all logs */
   ulong tot_meta_sz = 2*sizeof(ulong);
@@ -1726,10 +1726,10 @@ fd_runtime_finalize_txns_update_blockstore_meta( fd_exec_slot_ctx_t *         sl
 
       /* Update all the signatures */
       char const * sig_p = (char const *)txn_ctx->_txn_raw->raw + txn_ctx->txn_descriptor->signature_off;
-      fd_blockstore_txn_key_t sig;
+      fd_txn_key_t sig;
       for( uchar i=0U; i<txn_ctx->txn_descriptor->signature_cnt; i++ ) {
-        fd_memcpy( &sig, sig_p, sizeof(fd_blockstore_txn_key_t) );
-        fd_blockstore_txn_map_t * txn_map_entry = fd_blockstore_txn_map_query( txn_map, &sig, NULL );
+        fd_memcpy( &sig, sig_p, sizeof(fd_txn_key_t) );
+        fd_txn_map_t * txn_map_entry = fd_txn_map_query( txn_map, &sig, NULL );
         if( FD_LIKELY( txn_map_entry ) ) {
           txn_map_entry->meta_gaddr = meta_gaddr;
           txn_map_entry->meta_sz    = meta_sz;
@@ -1824,7 +1824,7 @@ fd_runtime_finalize_txns_tpool( fd_exec_slot_ctx_t *         slot_ctx,
         fd_acc_mgr_view( txn_ctx->acc_mgr, txn_ctx->funk_txn, &txn_ctx->accounts[0], borrowed_account );
         memcpy( borrowed_account->pubkey->key, &txn_ctx->accounts[0], sizeof(fd_pubkey_t) );
 
-        void * borrowed_account_data = fd_spad_alloc( txn_ctx->spad, FD_SPAD_ALIGN, FD_ACC_TOT_SZ_MAX );
+        void * borrowed_account_data = fd_spad_alloc( txn_ctx->spad, FD_ACCOUNT_REC_ALIGN, FD_ACC_TOT_SZ_MAX );
         fd_borrowed_account_make_modifiable( borrowed_account, borrowed_account_data );
         borrowed_account->meta->info.lamports -= (txn_ctx->execution_fee + txn_ctx->priority_fee);
 
@@ -3146,7 +3146,8 @@ fd_runtime_calculate_fee(fd_exec_txn_ctx_t *txn_ctx,
     fd_txn_instr_t const *txn_instr = &txn_descriptor->instr[i];
     fd_pubkey_t *program_id = &txn_ctx->accounts[txn_instr->program_id];
     if (memcmp(program_id->uc, fd_solana_keccak_secp_256k_program_id.key, sizeof(fd_pubkey_t)) == 0 ||
-        memcmp(program_id->uc, fd_solana_ed25519_sig_verify_program_id.key, sizeof(fd_pubkey_t)) == 0)
+        memcmp(program_id->uc, fd_solana_ed25519_sig_verify_program_id.key, sizeof(fd_pubkey_t)) == 0 ||
+        memcmp(program_id->uc, fd_solana_secp256r1_program_id.key, sizeof(fd_pubkey_t)) == 0)
     {
       if (txn_instr->data_sz == 0)
       {

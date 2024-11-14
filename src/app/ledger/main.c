@@ -532,7 +532,7 @@ fd_ledger_main_setup( fd_ledger_args_t * args ) {
 
   args->spad_cnt = fd_tpool_worker_cnt( args->tpool );
   for( ulong i=0UL; i<args->spad_cnt; i++ ) {
-    ulong       total_mem_sz = fd_ulong_align_up( 128UL * FD_ACC_SZ_MAX, FD_SPAD_ALIGN );
+    ulong       total_mem_sz = fd_spad_footprint( MAX_TX_ACCOUNT_LOCKS * fd_ulong_align_up( FD_ACC_TOT_SZ_MAX, FD_ACCOUNT_REC_ALIGN ) );
     uchar *     mem          = fd_wksp_alloc_laddr( args->wksp, FD_SPAD_ALIGN, total_mem_sz, 999UL );
     fd_spad_t * spad         = fd_spad_join( fd_spad_new( mem, total_mem_sz ) );
     if( FD_UNLIKELY( !spad ) ) {
@@ -750,13 +750,13 @@ init_blockstore( fd_ledger_args_t * args ) {
     }
     FD_LOG_NOTICE(( "joined blockstore" ));
   } else {
-    shmem = fd_wksp_alloc_laddr( args->wksp, fd_blockstore_align(), fd_blockstore_footprint(), blockstore_tag );
+    ulong txn_max = 1 << 22UL;
+    shmem = fd_wksp_alloc_laddr( args->wksp, fd_blockstore_align(), fd_blockstore_footprint( args->shred_max, args->slot_history_max, txn_max ), blockstore_tag );
     if( shmem == NULL ) {
       FD_LOG_ERR(( "failed to allocate a blockstore" ));
     }
-    ulong lg_txn_max = 22UL;
     args->blockstore = fd_blockstore_join( fd_blockstore_new( shmem, 1, args->hashseed, args->shred_max,
-                                                              args->slot_history_max, lg_txn_max ) );
+                                                              args->slot_history_max, txn_max ) );
     if( args->blockstore == NULL ) {
       fd_wksp_free_laddr( shmem );
       FD_LOG_ERR(( "failed to allocate a blockstore" ));
@@ -1119,6 +1119,8 @@ replay( fd_ledger_args_t * args ) {
 
   fd_ledger_main_setup( args );
 
+  fd_blockstore_init( args->blockstore, &args->slot_ctx->slot_bank );
+
   if( !args->on_demand_block_ingest ) {
     ingest_rocksdb( args->alloc, args->rocksdb_list[ 0UL ], args->start_slot, args->end_slot, args->blockstore, 0, args->trash_hash );
   }
@@ -1183,12 +1185,12 @@ prune( fd_ledger_args_t * args ) {
   }
   /* Create blockstore */
   fd_blockstore_t * pruned_blockstore;
-  void * shmem = fd_wksp_alloc_laddr( pruned_wksp, fd_blockstore_align(), fd_blockstore_footprint(), FD_BLOCKSTORE_MAGIC );
+  void * shmem = fd_wksp_alloc_laddr( pruned_wksp, fd_blockstore_align(), fd_blockstore_footprint( args->shred_max, args->slot_history_max, 1UL << 22UL ), FD_BLOCKSTORE_MAGIC );
   if( shmem == NULL ) {
     FD_LOG_ERR(( "failed to allocate a blockstore" ));
   }
   pruned_blockstore = fd_blockstore_join( fd_blockstore_new( shmem, 1, args->hashseed, args->shred_max,
-                                                             args->slot_history_max, 22 ) );
+                                                             args->slot_history_max, 1UL << 22UL ) );
   if( pruned_blockstore == NULL ) {
     fd_wksp_free_laddr( shmem );
     FD_LOG_ERR(( "failed to allocate a blockstore" ));

@@ -283,9 +283,15 @@ typedef struct {
       ulong tpool_thread_count;
       char  cluster_version[ 32 ];
       ulong snapshot_interval;
+      int   in_wen_restart;
+      char  wen_restart_coordinator[ FD_BASE58_ENCODED_32_SZ ];
     } replay;
 
     struct {
+      ulong blockstore_shred_max;
+      ulong blockstore_block_max;
+      ulong blockstore_txn_max;
+      ulong blockstore_alloc_max;
       char  blockstore_restore[ PATH_MAX ];
       char  slots_pending[PATH_MAX];
       char  shred_cap_archive[ PATH_MAX ];

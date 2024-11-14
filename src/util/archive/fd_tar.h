@@ -285,12 +285,11 @@ fd_tar_writer_footprint( void ) {
    to warning log. Reasons for failure include invalid memory region.
    The writer will enable the user to write/stream out files of variable
    size into a continual stream. The writer should persist for the span of
-   a single tar archive. The writer will be responsible for creating and holding
-   the file descriptor for the tar archive. */
+   a single tar archive. The user is repsonsible for passing in an open, valid
+   file descriptor. */
 
 fd_tar_writer_t *
-fd_tar_writer_new( void *       mem,
-                   char const * tarball_name );
+fd_tar_writer_new( void * mem, int fd );
 
 /* fd_tar_writer_delete destroys a tar writer and frees any allocated
    resources. Returns the underlying memory region back to the caller.

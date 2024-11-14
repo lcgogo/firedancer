@@ -2,6 +2,9 @@
 #include "../runtime/sysvar/fd_sysvar_epoch_schedule.h"
 #include "../runtime/fd_hashes.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 #include <zstd.h>
 
 static uchar padding [ FD_SNAPSHOT_ACC_ALIGN ] = {0};
@@ -585,21 +588,14 @@ fd_snapshot_create_setup_and_validate_ctx( fd_snapshot_ctx_t * snapshot_ctx ) {
 static inline int
 fd_snapshot_create_setup_writer( fd_snapshot_ctx_t * snapshot_ctx ) {
   
-  /* Write out the snapshot tar archive to a temporary location that will be 
-     written to when the snapshot account hash is recalculated.
-     TODO: This temporary file should be made harder to access by an operator. */
-  char directory_buf[ FD_SNAPSHOT_DIR_MAX ];
-  int err = snprintf( directory_buf, FD_SNAPSHOT_DIR_MAX, "%s/tmp.tar", snapshot_ctx->out_dir );
-  if( FD_UNLIKELY( err<0 ) ) {
-    FD_LOG_WARNING(( "Failed to format directory string" ));
-    return -1;
-  }
+  /* Setup a tar writer. */
 
   uchar * writer_mem   = fd_valloc_malloc( snapshot_ctx->valloc, fd_tar_writer_align(), fd_tar_writer_footprint() );
-  snapshot_ctx->writer = fd_tar_writer_new( writer_mem, directory_buf );
+  snapshot_ctx->writer = fd_tar_writer_new( writer_mem, snapshot_ctx->tmp_fd );
   if( FD_UNLIKELY( !snapshot_ctx->writer ) ) {
     return -1;
   }
+
   return 0;
 }
 
@@ -747,22 +743,6 @@ fd_snapshot_create_write_manifest_and_acc_vecs( fd_snapshot_ctx_t  * snapshot_ct
 static int
 fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
 
-
-  char directory_buf_og  [ FD_SNAPSHOT_DIR_MAX ];
-  char directory_buf_zstd[ FD_SNAPSHOT_DIR_MAX ];
-  int err = snprintf( directory_buf_og,  FD_SNAPSHOT_DIR_MAX, "%s/tmp.tar", snapshot_ctx->out_dir);
-  if( FD_UNLIKELY( err<0 ) ) {
-    FD_LOG_WARNING(( "Failed to format directory string" ));
-    return -1;
-  }
-
-  err = snprintf( directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/snapshot-%lu-%s.tar.zst", 
-                  snapshot_ctx->out_dir, snapshot_ctx->slot, FD_BASE58_ENC_32_ALLOCA(&snapshot_ctx->hash) );
-  if( FD_UNLIKELY( err<0 ) ) {
-    FD_LOG_WARNING(( "Failed to format directory string" ));
-    return -1;
-  }
-
   /* Compress the file using zstd. First open the non-compressed file and
      create a file for the compressed file. */
 
@@ -777,7 +757,7 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
   /* Reopen the tarball and open/overwrite the filename for the compressed,
      finalized full snapshot. Setup the zstd compression stream. */
 
-  err = 0;
+  int err = 0;
 
   ZSTD_CStream * cstream = ZSTD_createCStream();
   if( FD_UNLIKELY( !cstream ) ) {
@@ -786,30 +766,9 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
   }
   ZSTD_initCStream( cstream, ZSTD_CLEVEL_DEFAULT ); 
 
-  int fd      = 0;
-  int fd_zstd = 0;
   fd_io_buffered_ostream_t ostream[1];
 
-  fd = open( directory_buf_og, O_RDONLY );
-  if( FD_UNLIKELY( fd==-1 ) ) {
-    FD_LOG_WARNING(( "Failed to open the tar archive (%i-%s)", errno, fd_io_strerror( errno ) ));
-    err = -1;
-    goto cleanup;
-  }
-
-  fd_zstd = open( directory_buf_zstd, O_WRONLY | O_CREAT | O_TRUNC );
-  if( FD_UNLIKELY( fd_zstd==-1 ) ) {
-    FD_LOG_WARNING(( "Failed to open the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
-    err = -1;
-    goto cleanup;
-  }
-  err = ftruncate( fd_zstd, 0UL );
-  if( FD_UNLIKELY( err=-1 && errno!=0 ) ) {
-    FD_LOG_WARNING(( "Failed to truncate the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
-     goto cleanup;
-  }
-
-  if( FD_UNLIKELY( !fd_io_buffered_ostream_init( ostream, fd_zstd, out_buf, out_buf_sz ) ) ) {
+  if( FD_UNLIKELY( !fd_io_buffered_ostream_init( ostream, snapshot_ctx->snapshot_fd, out_buf, out_buf_sz ) ) ) {
     FD_LOG_WARNING(( "Failed to initialize the ostream" ));
     err = -1;
     goto cleanup;
@@ -820,6 +779,14 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
      compress them. We will keep going until we see an EOF in a tar archive. */
 
   ulong in_sz = in_buf_sz;
+
+  ulong off = (ulong)lseek( snapshot_ctx->tmp_fd, 0, SEEK_SET );
+  if( FD_UNLIKELY( off ) ) {
+    FD_LOG_WARNING(( "Failed to seek to the beginning of the file" ));
+    err = -1;
+    goto cleanup;
+  }
+
   while( in_sz==in_buf_sz ) {
 
     /* Read chunks from the file. There isn't really a need to use a streamed
@@ -827,8 +794,7 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
        file read except for the very last one.
        
        in_sz will only not equal in_buf_sz on the last read. */
-
-    err = fd_io_read( fd, in_buf, 0UL, in_buf_sz, &in_sz );
+    err = fd_io_read( snapshot_ctx->tmp_fd, in_buf, 0UL, in_buf_sz, &in_sz );
     if( FD_UNLIKELY( err ) ) {
       FD_LOG_WARNING(( "Failed to read in the file" ));
       goto cleanup;
@@ -874,20 +840,36 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Failed to flush the ostream" ));
   }
-  err = close( fd );
-  if( FD_UNLIKELY( err==-1 ) ) {
-    FD_LOG_WARNING(( "Failed to close the tar archive (%i-%s)", errno, fd_io_strerror( errno ) ));
-  }
-  err = close( fd_zstd );
-  if( FD_UNLIKELY( err==-1 ) ) {
-    FD_LOG_WARNING(( "Failed to close the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
-  }
-  err = remove( directory_buf_og );
-  if( FD_UNLIKELY( err==-1 ) ) {
-    FD_LOG_WARNING(( "Failed to remove the tar archive (%i-%s)", errno, fd_io_strerror( errno ) ));
+
+  if( FD_UNLIKELY( err ) ) {
+    return err;
   }
 
-  return err;
+  /* Assuming that there was a successful write, make the compressed
+     snapshot file readable and servable. */
+
+  char tmp_directory_buf_zstd[ FD_SNAPSHOT_DIR_MAX ];
+  err = snprintf( tmp_directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/%s", snapshot_ctx->out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_WARNING(( "Failed to format directory string" ));
+    return -1;
+  }
+
+  char directory_buf_zstd[ FD_SNAPSHOT_DIR_MAX ];
+  err = snprintf( directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/snapshot-%lu-%s.tar.zst", 
+                  snapshot_ctx->out_dir, snapshot_ctx->slot, FD_BASE58_ENC_32_ALLOCA(&snapshot_ctx->hash) );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_WARNING(( "Failed to format directory string" ));
+    return -1;
+  }
+
+  err = rename( tmp_directory_buf_zstd, directory_buf_zstd );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_WARNING(( "Failed to rename file (%i-%s)", errno, fd_io_strerror( errno ) ));
+    return -1;
+  }
+
+  return 0;
 }
 
 int
@@ -944,4 +926,46 @@ fd_snapshot_create_new_snapshot( fd_snapshot_ctx_t * snapshot_ctx ) {
   return err;
 
   } FD_SCRATCH_SCOPE_END;
+}
+
+int
+fd_snapshot_create_new_snapshot_offline( fd_snapshot_ctx_t * snapshot_ctx ) {
+
+  /* Write out the snapshot tar archive to a temporary location that will be 
+     written to when the snapshot account hash is recalculated.
+     TODO: This temporary file should be made harder to access by an operator. */
+
+  char tmp_dir_buf[ FD_SNAPSHOT_DIR_MAX ];
+  int err = snprintf( tmp_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/.tmp.tar", snapshot_ctx->out_dir );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_WARNING(( "Failed to format directory string" ));
+    return -1;
+  }
+
+  char zstd_dir_buf[ FD_SNAPSHOT_DIR_MAX ];
+  err = snprintf( zstd_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/.tmp.tar.zst", snapshot_ctx->out_dir );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_WARNING(( "Failed to format directory string" ));
+    return -1;
+  }
+
+  /* Create and open the relevant files for snapshots. */
+
+  snapshot_ctx->tmp_fd = open( tmp_dir_buf, O_CREAT | O_RDWR | O_TRUNC, 0644 );
+  if( FD_UNLIKELY( snapshot_ctx->tmp_fd==-1 ) ) {
+    FD_LOG_WARNING(( "Failed to open and create tarball for file=%s (%i-%s)", tmp_dir_buf, errno, fd_io_strerror( errno ) ));
+    return -1;
+  }
+
+  snapshot_ctx->snapshot_fd = open( zstd_dir_buf, O_RDWR | O_CREAT | O_TRUNC, 0644 );
+  if( FD_UNLIKELY( snapshot_ctx->snapshot_fd==-1 ) ) {
+    FD_LOG_WARNING(( "Failed to open the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
+    return -1;
+  }
+
+  /* Now that all of the files are open, create a snapshot. */
+
+  FD_TEST( 0 == fd_snapshot_create_new_snapshot( snapshot_ctx ) );
+  return 0;
+
 }

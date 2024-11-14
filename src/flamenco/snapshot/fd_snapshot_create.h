@@ -29,6 +29,9 @@
 #define FD_SNAPSHOT_VERSION_LEN       (5UL)
 #define FD_SNAPSHOT_STATUS_CACHE_FILE ("snapshots/status_cache")
 
+#define FD_SNAPSHOT_TMP_ARCHIVE       (".tmp.tar")
+#define FD_SNAPSHOT_TMP_ARCHIVE_ZSTD  (".tmp.tar.zst")
+
 FD_PROTOTYPES_BEGIN
 
 /* fd_snapshot_ctx_t holds various data structures needed for snapshot
@@ -42,8 +45,14 @@ struct fd_snapshot_ctx {
   ulong             slot;
   char const *      out_dir;
   uchar             is_incremental;
-  fd_tar_writer_t * writer;
   fd_valloc_t       valloc;
+
+  /* TODO: Add a comment here */
+  int               tmp_fd;
+  int               snapshot_fd;
+
+  /* This gets setup within the context and not by the user */
+  fd_tar_writer_t * writer;
   fd_hash_t         hash;
   fd_slot_bank_t    slot_bank;
   fd_epoch_bank_t   epoch_bank;
@@ -83,6 +92,16 @@ typedef struct fd_snapshot_ctx fd_snapshot_ctx_t;
 
 int
 fd_snapshot_create_new_snapshot( fd_snapshot_ctx_t * snapshot_ctx );
+
+/* fd_snapshot_create_new_snapshot_offline is a strict superset of the 
+   above function. It is repsonsible for managing the file descriptors
+   used in snapshot creation. It should ONLY be used for creating
+   snapshots for offline replay. The reason that file descriptors are
+   not managed by the snapshot library for running a live node is to 
+   maintain the sandbox model. */
+
+int
+fd_snapshot_create_new_snapshot_offline( fd_snapshot_ctx_t * snapshot_ctx );
 
 FD_PROTOTYPES_END
 

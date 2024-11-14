@@ -338,6 +338,8 @@ typedef struct {
     struct {
       ulong interval;
       char  out_dir[ PATH_MAX ];
+      int   tmp_fd;
+      int   snapshot_fd;
     } snaps;
 
   };

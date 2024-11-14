@@ -10,8 +10,9 @@
 static char null_tar_block[ FD_TAR_BLOCK_SZ ] = {0};
 
 fd_tar_writer_t *
-fd_tar_writer_new( void *       mem,
-                   char const * tarball_name ) {
+fd_tar_writer_new( void * mem, int fd ) {
+
+  /* Allocate the relevant memory for the writer. */
 
   if( FD_UNLIKELY( !mem ) ) {
     FD_LOG_WARNING(( "NULL mem" ));
@@ -25,11 +26,10 @@ fd_tar_writer_new( void *       mem,
 
   fd_tar_writer_t * writer = (fd_tar_writer_t *)mem;
 
-  /* Create and open the file */
+  /* Make sure that the file descriptor is valid. */
 
-  int fd = open( tarball_name, O_CREAT | O_RDWR, 0644 );
-  if( FD_UNLIKELY( fd==-1 ) ) {
-    FD_LOG_WARNING(( "Failed to open and create tarball for file=%s (%i-%s)", tarball_name, errno, fd_io_strerror( errno ) ));
+  if( FD_UNLIKELY( fd<=0 ) ) {
+    FD_LOG_WARNING(( "Invalid file descriptor" ));
     return NULL;
   }
 
@@ -64,14 +64,6 @@ fd_tar_writer_delete( fd_tar_writer_t * writer ) {
   err = fd_io_write( writer->fd, null_tar_block, FD_TAR_BLOCK_SZ, FD_TAR_BLOCK_SZ, &out_sz );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Failed to write out the final tar trailer (%i-%s)", errno, fd_io_strerror( errno ) ));
-    return NULL;
-  }
-
-  /* Close the file descriptor */
-
-  err = close( writer->fd );
-  if( FD_UNLIKELY( err ) ) {
-    FD_LOG_WARNING(( "Failed to close the tarball file descriptor (%i-%s)", errno, fd_io_strerror( errno ) ));
     return NULL;
   }
 

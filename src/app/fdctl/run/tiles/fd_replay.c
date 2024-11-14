@@ -590,7 +590,7 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
 
   FD_LOG_WARNING(("PUBLISHING SLOT %lu", smr));
 
-  if( smr%ctx->snapshot_interval==0 ) {
+  if( smr%ctx->snapshot_interval==0UL && fd_fseq_query( ctx->is_constipated)==0UL ) {
     FD_LOG_WARNING(("CONSTIPATING AFTER ROOTING SLOT %lu", smr));
     fd_fseq_update( ctx->is_constipated, smr );
     FD_TEST( fd_fseq_query( ctx->is_constipated ) != 0 );

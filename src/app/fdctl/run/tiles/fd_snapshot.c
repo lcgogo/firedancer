@@ -10,6 +10,8 @@
 #include "../../../../flamenco/runtime/fd_runtime.h"
 #include "../../../../flamenco/snapshot/fd_snapshot_create.h"
 
+#include "generated/snaps_seccomp.h"
+
 #define SCRATCH_MAX    (1024UL /*MiB*/ << 21)
 #define SCRATCH_DEPTH  (128UL) /* 128 scratch frames */
 
@@ -21,6 +23,9 @@ struct fd_snapshot_tile_ctx {
   fd_wksp_t     * status_cache_wksp;
   ulong         * smr;
   ulong         * is_constipated;
+
+  int             tmp_fd;
+  int             snapshot_fd;
 };
 typedef struct fd_snapshot_tile_ctx fd_snapshot_tile_ctx_t;
 
@@ -42,7 +47,33 @@ static void
 privileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
                  fd_topo_tile_t * tile FD_PARAM_UNUSED ) {
 
-  FD_LOG_WARNING(("UNIMPLEMENTED"));
+  /* First open the relevant files here. */
+  FD_LOG_WARNING(("DONE HERE 1"));
+
+  char tmp_dir_buf[ FD_SNAPSHOT_DIR_MAX ];
+  int err = snprintf( tmp_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/%s", tile->snaps.out_dir, FD_SNAPSHOT_TMP_ARCHIVE );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_ERR(( "Failed to format directory string" ));
+  }
+
+  char zstd_dir_buf[ FD_SNAPSHOT_DIR_MAX ];
+  err = snprintf( zstd_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/%s", tile->snaps.out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_ERR(( "Failed to format directory string" ));
+  }
+
+  /* Create and open the relevant files for snapshots. */
+
+  tile->snaps.tmp_fd = open( tmp_dir_buf, O_CREAT | O_RDWR | O_TRUNC, 0644 );
+  if( FD_UNLIKELY( tile->snaps.tmp_fd==-1 ) ) {
+    FD_LOG_ERR(( "Failed to open and create tarball for file=%s (%i-%s)", tmp_dir_buf, errno, fd_io_strerror( errno ) ));
+  }
+
+  tile->snaps.snapshot_fd = open( zstd_dir_buf, O_RDWR | O_CREAT | O_TRUNC, 0644 );
+  if( FD_UNLIKELY( tile->snaps.snapshot_fd==-1 ) ) {
+    FD_LOG_WARNING(( "Failed to open the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
+  }
+
   return;
 }
 
@@ -52,6 +83,8 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
 
 
   void * scratch = fd_topo_obj_laddr( topo, tile->tile_obj_id );
+
+  FD_LOG_WARNING(("DONE HERE 2"));
 
   /**********************************************************************/
   /* scratch (bump)-allocate memory owned by the replay tile            */
@@ -66,8 +99,10 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   void * scratch_fmem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   ulong  scratch_alloc_mem   = FD_SCRATCH_ALLOC_FINI  ( l, scratch_align() );
 
-  ctx->interval = tile->snaps.interval;
-  ctx->out_dir  = tile->snaps.out_dir;
+  ctx->interval    = tile->snaps.interval;
+  ctx->out_dir     = tile->snaps.out_dir;
+  ctx->tmp_fd      = tile->snaps.tmp_fd;
+  ctx->snapshot_fd = tile->snaps.snapshot_fd;
 
   /**********************************************************************/
   /* funk                                                               */
@@ -153,28 +188,73 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
       .valloc         = fd_scratch_virtual(),
       .acc_mgr        = fd_acc_mgr_new( mem, ctx->funk ),
       .status_cache   = ctx->status_cache,
+      .tmp_fd         = ctx->tmp_fd,
+      .snapshot_fd    = ctx->snapshot_fd,
     };
+
+    /* If this isn't the first snapshot that this tile is creating, the
+       permissions should be made to not acessible by users and should be
+       renamed to the constant file that is expected. */
+
+    char prev_filename[ FD_SNAPSHOT_DIR_MAX ];
+    snprintf( prev_filename, FD_SNAPSHOT_DIR_MAX, "/proc/self/fd/%d", ctx->snapshot_fd );
+    long len = readlink( prev_filename, prev_filename, FD_SNAPSHOT_DIR_MAX );
+    if( FD_UNLIKELY( len==-1L ) ) {
+      FD_LOG_ERR(( "Failed to readlink the snapshot file" ));
+    }
+    prev_filename[ len ] = '\0';
+
+
+    char new_filename[ FD_SNAPSHOT_DIR_MAX ];
+    snprintf( new_filename, FD_SNAPSHOT_DIR_MAX, "%s/%s", ctx->out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
+
+    rename( prev_filename, new_filename );
 
     FD_TEST( 0 == fd_snapshot_create_new_snapshot( &snapshot_ctx ) );
 
+    FD_LOG_ERR(("ASDF ASDF ASDF"));
+
     fd_fseq_update( ctx->is_constipated, 0UL );
-
-
-    FD_LOG_ERR(("DONE CREATING A NEW SNAPSHOT"));
 
   }
 
 }
 
 static ulong
-populate_allowed_fds( fd_topo_t const *      topo        FD_PARAM_UNUSED,
-                      fd_topo_tile_t const * tile        FD_PARAM_UNUSED,
-                      ulong                  out_fds_cnt FD_PARAM_UNUSED,
-                      int *                  out_fds     FD_PARAM_UNUSED ) {
+populate_allowed_seccomp( fd_topo_t const *      topo,
+                          fd_topo_tile_t const * tile,
+                          ulong                  out_cnt,
+                          struct sock_filter *   out ) {
+  (void)topo;
 
-  FD_LOG_WARNING(("POPULATE ALLOWED FDS" ));
+  FD_LOG_WARNING(("DONE HERE 4"));
 
-  return 0;
+  populate_sock_filter_policy_snaps( out_cnt, out, (uint)fd_log_private_logfile_fd(), (uint)tile->snaps.tmp_fd, (uint)tile->snaps.snapshot_fd );
+  return sock_filter_policy_snaps_instr_cnt;
+}
+
+static ulong
+populate_allowed_fds( fd_topo_t const *      topo,
+                      fd_topo_tile_t const * tile,
+                      ulong                  out_fds_cnt,
+                      int *                  out_fds ) {
+  (void)topo;
+  (void)tile;
+
+  FD_LOG_WARNING(("DONE HERE 5"));
+
+  if( FD_UNLIKELY( out_fds_cnt<2UL ) ) {
+    FD_LOG_ERR(( "out_fds_cnt %lu", out_fds_cnt ));
+  }
+
+  ulong out_cnt = 0UL;
+  out_fds[ out_cnt++ ] = 2; /* stderr */
+  if( FD_LIKELY( -1!=fd_log_private_logfile_fd() ) )
+    out_fds[ out_cnt++ ] = fd_log_private_logfile_fd(); /* logfile */
+
+  out_fds[ out_cnt++ ] = tile->snaps.tmp_fd;
+  out_fds[ out_cnt++ ] = tile->snaps.snapshot_fd;
+  return out_cnt;
 }
 
 #define STEM_BURST (1UL)
@@ -188,6 +268,7 @@ populate_allowed_fds( fd_topo_t const *      topo        FD_PARAM_UNUSED,
 
 fd_topo_run_tile_t fd_tile_snaps = {
   .name                     = "snaps",
+  .populate_allowed_seccomp = populate_allowed_seccomp,
   .populate_allowed_fds     = populate_allowed_fds,
   .scratch_align            = scratch_align,
   .scratch_footprint        = scratch_footprint,

@@ -130,7 +130,7 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
 
   FD_LOG_WARNING(("Starting snapshot creation at slot=%lu", snapshot_ctx->slot));
 
-  int err = fd_snapshot_create_new_snapshot( snapshot_ctx );
+  int err = fd_snapshot_create_new_snapshot_offline( snapshot_ctx );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_ERR(( "failed to create snapshot" ));
   }

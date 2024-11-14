@@ -22,16 +22,6 @@ write: (or (eq (arg 0) 2)
 # arg 0 is the file descriptor to fsync.
 fsync: (eq (arg 0) logfile_fd)
 
-
-# snapshot:
-#
-# The only file descriptors that you can open are for the tmp file and 
-# the snapshot file. These files must be read/write, creatable, and 
-# be possible to truncate.
-open: (and (or (eq (arg 0) tmp_fd) 
-               (eq (arg 0) snapshot_fd)) 
-           (eq (arg 1) "O_RDWR|O_CREAT|O_TRUNC"))
-
 # snapshot:
 #
 # The only file descriptors that should have their permission changed are
@@ -41,11 +31,13 @@ open: (and (or (eq (arg 0) tmp_fd)
 # read/write by the owner at all times. When it is being written to, others
 # should not have access to the file. Otherwise, anyone should be able to
 # read the snapshot file.
-fchmod: (or (and (eq (arg 0) tmp_fd)
-                 (eq (arg 1) "S_IRUSR|S_IWUSR")) 
-            (and (eq (arg 0) snapshot_fd)
-                 (or (eq (arg 1) "S_IRUSR|S_IWUSR")
-                     (eq (arg 1) "S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH"))))
+# fchmod: (or (and (eq (arg 0) tmp_fd)
+#                  (eq (arg 1) "S_IRUSR|S_IWUSR")) 
+#             (and (eq (arg 0) snapshot_fd)
+#                  (or (eq (arg 1) "S_IRUSR|S_IWUSR")
+#                      (eq (arg 1) "S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH"))))
+
+fchmod: (eq (arg 1) "S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH")
 
 # snapshot:
 #

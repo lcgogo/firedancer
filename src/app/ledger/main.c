@@ -171,12 +171,13 @@ init_tpool( fd_ledger_args_t * ledger_args ) {
     }
   }
 
+  ledger_args->tpool = tpool;
+
   /* If a snapshot is being created, setup its own tpool. */
 
   if( !snapshot_tcnt ) {
     return 0;
   }
-  ledger_args->tpool = tpool;
 
   fd_tpool_t * snapshot_tpool = fd_tpool_init( ledger_args->tpool_mem_two, snapshot_tcnt );
   ulong        scratch_sz     = fd_scratch_smem_footprint( 256UL<<23UL );

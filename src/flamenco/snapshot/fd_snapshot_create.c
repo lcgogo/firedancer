@@ -35,11 +35,49 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
   fd_pubkey_t * * snapshot_slot_keys    = fd_valloc_malloc( snapshot_ctx->valloc, alignof(fd_pubkey_t*), sizeof(fd_pubkey_t*) * FD_WRITABLE_ACCS_IN_SLOT );
   ulong           snapshot_slot_key_cnt = 0UL;
 
-  /* Setup the storages for the accounts db index. */
+  /* In order to size out the accounts DB index in the manifest, we must
+     iterate through funk and accumulate the size of all of the records
+     from all slots before the snapshot_slot. slot */
+
+  fd_funk_t * funk    = snapshot_ctx->acc_mgr->funk;
+  ulong       prev_sz = 0UL;
+  for( fd_funk_rec_t const * rec = fd_funk_txn_first_rec( funk, NULL ); NULL != rec; rec = fd_funk_txn_next_rec( funk, rec ) ) {
+
+    if( !fd_funk_key_is_acc( rec->pair.key ) ) {
+      continue;
+    }
+
+    uchar             const * raw      = fd_funk_val( rec, fd_funk_wksp( funk ) );
+    fd_account_meta_t const * metadata = fd_type_pun_const( raw );
+
+    if( !metadata ) {
+      continue;
+    }
+
+    if( metadata->magic!=FD_ACCOUNT_META_MAGIC ) {
+      continue;
+    }
+
+    /* We know that all of the accounts from the snapshot slot can fit into
+       one append vec, so we ignore all accounts from the snapshot slot. */
+
+    if( metadata->slot==snapshot_ctx->slot ) {
+      continue;
+    }
+
+    prev_sz += metadata->dlen + sizeof(fd_solana_account_hdr_t);
+
+  }
+
+  /* When we account for the number of slots we need to consider one append vec
+     for the snapshot slot and try to maximally fill up the others. */
+
+  ulong num_slots = 1UL + prev_sz / FD_SNAPSHOT_APPEND_VEC_SZ_MAX + 
+                    (prev_sz % FD_SNAPSHOT_APPEND_VEC_SZ_MAX ? 1UL : 0UL);
 
   fd_solana_accounts_db_fields_t * accounts_db = &manifest->accounts_db;
 
-  accounts_db->storages_len                   = 2UL;
+  accounts_db->storages_len                   = num_slots;
   accounts_db->storages                       = fd_valloc_malloc( snapshot_ctx->valloc,
                                                                   FD_SNAPSHOT_SLOT_ACC_VECS_ALIGN,
                                                                   sizeof(fd_snapshot_slot_acc_vecs_t) * accounts_db->storages_len );
@@ -50,23 +88,20 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
   accounts_db->historical_roots_with_hash_len = 0UL;
   accounts_db->historical_roots_with_hash     = NULL;
 
-  /* Prepopulate storages metadata for the two append vecs. */
+  for( ulong i=0UL; i<num_slots; i++ ) {
+    /* Populate the storages for each slot. As a note, the slot number only
+       matters for the snapshot slot. The other slot numbers don't affect
+       consensus at all. Agave also maintains an invariant that there can 
+       only be one account vec per storage. */
 
-  accounts_db->storages[0].account_vecs_len        = 1UL;
-  accounts_db->storages[0].account_vecs            = fd_valloc_malloc( snapshot_ctx->valloc,
-                                                                       FD_SNAPSHOT_ACC_VEC_ALIGN,
-                                                                       sizeof(fd_snapshot_acc_vec_t) * accounts_db->storages[0].account_vecs_len );
-  accounts_db->storages[0].account_vecs[0].file_sz = 0UL;
-  accounts_db->storages[0].account_vecs[0].id      = 1UL;
-  accounts_db->storages[0].slot                    = snapshot_ctx->slot - 1UL;
-
-  accounts_db->storages[1].account_vecs_len        = 1UL;
-  accounts_db->storages[1].account_vecs            = fd_valloc_malloc( snapshot_ctx->valloc,
-                                                                       FD_SNAPSHOT_ACC_VEC_ALIGN,
-                                                                       sizeof(fd_snapshot_acc_vec_t) * accounts_db->storages[1].account_vecs_len );
-  accounts_db->storages[1].account_vecs[0].file_sz = 0UL;
-  accounts_db->storages[1].account_vecs[0].id      = 2UL;
-  accounts_db->storages[1].slot                    = snapshot_ctx->slot; /* All accounts in the snapshot slot */
+    accounts_db->storages[ i ].account_vecs_len          = 1UL;
+    accounts_db->storages[ i ].account_vecs              = fd_valloc_malloc( snapshot_ctx->valloc,
+                                                                             FD_SNAPSHOT_ACC_VEC_ALIGN,
+                                                                             sizeof(fd_snapshot_acc_vec_t) * accounts_db->storages[ i ].account_vecs_len );
+    accounts_db->storages[ i ].account_vecs[ 0 ].file_sz = 0UL;
+    accounts_db->storages[ i ].account_vecs[ 0 ].id      = i + 1UL;
+    accounts_db->storages[ i ].slot                      = snapshot_ctx->slot - i;
+  }
 
   /* Populate the snapshot hash into the accounts db. */
 
@@ -114,12 +149,13 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
   /* Iterate through all of the records in the funk root and create/populate an
      append vec for previous slots. Just record the pubkeys for the latest
-     slot to populate the append vec after. */
+     slot to populate the append vec after. If the append vec is full, write
+     into the next one. */
 
-  fd_funk_t *             funk      = snapshot_ctx->acc_mgr->funk;
-  fd_snapshot_acc_vec_t * prev_accs = &accounts_db->storages[0].account_vecs[0];
+  ulong curr_slot = 1UL;
+  fd_snapshot_acc_vec_t * prev_accs = &accounts_db->storages[ curr_slot ].account_vecs[ 0UL ];
 
-  err = snprintf( buffer, FD_SNAPSHOT_DIR_MAX, "accounts/%lu.%lu", snapshot_ctx->slot - 1UL, prev_accs->id );
+  err = snprintf( buffer, FD_SNAPSHOT_DIR_MAX, "accounts/%lu.%lu", snapshot_ctx->slot - curr_slot, prev_accs->id );
   if( FD_UNLIKELY( err<0 ) ) {
     FD_LOG_WARNING(( "Unable to format previous accounts name string" ));
     return -1;
@@ -132,7 +168,7 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
   for( fd_funk_rec_t const * rec = fd_funk_txn_first_rec( funk, NULL ); NULL != rec; rec = fd_funk_txn_next_rec( funk, rec ) ) {
 
-    /* Get the account data */
+    /* Get the account data. */
 
     if( !fd_funk_key_is_acc( rec->pair.key ) ) {
       continue;
@@ -154,11 +190,31 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
     /* All accounts that were touched in the snapshot slot should be in 
        a different append vec so that Agave can calculate the snapshot slot's
-       bank hash. */
+       bank hash. We don't want to include them in an arbitrary append vec. */
 
     if( metadata->slot==snapshot_ctx->slot ) {
-      snapshot_slot_keys[ snapshot_slot_key_cnt++ ] = (fd_pubkey_t *)pubkey;
+      snapshot_slot_keys[ snapshot_slot_key_cnt++ ] = (fd_pubkey_t*)pubkey;
       continue;
+    }
+
+    ulong new_sz = prev_accs->file_sz + sizeof(fd_solana_account_hdr_t) + fd_ulong_align_up( metadata->dlen, FD_SNAPSHOT_ACC_ALIGN );
+
+    if( new_sz > FD_SNAPSHOT_APPEND_VEC_SZ_MAX ) {
+
+      /* When the current append vec is full, finish writing it, start writing 
+         into the next append vec. */
+
+      fd_tar_writer_fini_file( writer );
+
+      prev_accs = &accounts_db->storages[ ++curr_slot ].account_vecs[ 0UL ];
+
+      err = snprintf( buffer, FD_SNAPSHOT_DIR_MAX, "accounts/%lu.%lu", snapshot_ctx->slot - curr_slot, prev_accs->id );
+      if( FD_UNLIKELY( err<0 ) ) {
+        FD_LOG_WARNING(( "Unable to format previous accounts name string" ));
+        return -1;
+      }
+
+      fd_tar_writer_new_file( writer, buffer );
     }
 
     prev_accs->file_sz += sizeof(fd_solana_account_hdr_t) + fd_ulong_align_up( metadata->dlen, FD_SNAPSHOT_ACC_ALIGN );
@@ -198,8 +254,9 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
   fd_tar_writer_fini_file( writer );
 
-  /* Snapshot slot */
-  fd_snapshot_acc_vec_t * curr_accs = &accounts_db->storages[1].account_vecs[0];
+  /* Now write out the append vec for the snapshot slot. */
+
+  fd_snapshot_acc_vec_t * curr_accs = &accounts_db->storages[ 0UL ].account_vecs[ 0UL ];
   err = snprintf( buffer, FD_SNAPSHOT_DIR_MAX, "accounts/%lu.%lu", snapshot_ctx->slot, curr_accs->id );
   if( FD_UNLIKELY( err<0 ) ) {
     FD_LOG_WARNING(( "Unable to format current accounts name string" ));

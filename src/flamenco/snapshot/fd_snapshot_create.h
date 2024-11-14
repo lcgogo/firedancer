@@ -32,6 +32,8 @@
 #define FD_SNAPSHOT_TMP_ARCHIVE       (".tmp.tar")
 #define FD_SNAPSHOT_TMP_ARCHIVE_ZSTD  (".tmp.tar.zst")
 
+#define FD_SNAPSHOT_APPEND_VEC_SZ_MAX (16UL * 1024UL * 1024UL * 1024UL)
+
 FD_PROTOTYPES_BEGIN
 
 /* fd_snapshot_ctx_t holds various data structures needed for snapshot

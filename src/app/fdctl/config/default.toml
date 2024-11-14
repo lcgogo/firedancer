@@ -660,7 +660,7 @@ dynamic_port_range = "8900-9000"
     # configurable and designed to scale out for future network
     # conditions but there is no need to run more then 1 QUIC tile given
     # current `mainnet-beta` conditions, unless the validator is the
-    # subject of large DoS attack.
+    # subject of an attack.
     #
     # QUIC tiles are responsible for parsing incoming QUIC protocol
     # messages, managing connections and responding to clients.
@@ -689,16 +689,16 @@ dynamic_port_range = "8900-9000"
     # validator is not dropping incoming QUIC transactions from clients.
     #
     # On modern hardware, each verify tile can handle around 20-40K
-    # transactions per second.  Four tiles seems to be enough to handle
+    # transactions per second.  Six tiles seems to be enough to handle
     # current `mainnet-beta` traffic, unless the validator is under a
-    # DoS or spam attack.
-    verify_tile_count = 4
+    # denial of service or spam attack.
+    verify_tile_count = 6
 
-    # How many bank tiles to run.  Should be set to 2.  Bank tiles
+    # How many bank tiles to run.  Should be set to 4.  Bank tiles
     # execute transactions, so the validator can include the results of
     # the transaction into a block when we are leader.  Because of
     # current consensus limits restricting blocks to around 32,000
-    # transactions per block, there is no need to use more than 2 bank
+    # transactions per block, there is no need to use more than 4 bank
     # tiles on mainnet-beta.  For development and benchmarking, it can
     # be useful to increase this number further.
     #
@@ -706,7 +706,7 @@ dynamic_port_range = "8900-9000"
     # the agave runtime for execution, which takes various locks and
     # uses concurrent data structures which slow down with multiple
     # parallel users.
-    bank_tile_count = 2
+    bank_tile_count = 4
 
     # How many shred tiles to run.  Should be set to 1.  This is
     # configurable and designed to scale out for future network
@@ -861,7 +861,7 @@ dynamic_port_range = "8900-9000"
         # be accepted.
         #
         # This must be >= 2 and also a power of 2.
-        max_concurrent_connections = 65536
+        max_concurrent_connections = 131072
 
         # QUIC allows for multiple streams to be multiplexed over a
         # single connection.  This option sets the maximum number of
@@ -879,7 +879,7 @@ dynamic_port_range = "8900-9000"
         #
         # Increasing this number causes server-side performance to get
         # worse.
-        max_concurrent_streams_per_connection = 16
+        max_concurrent_streams_per_connection = 512
 
         # Controls how much transactions coming in via TPU can be
         # reassembled at the same time.  Reassembly is required for user
@@ -891,14 +891,14 @@ dynamic_port_range = "8900-9000"
         # Higher values reduce TPU packet loss over unreliable networks.
         # If this parameter is set too low, packet loss can cause some
         # large transactions to get dropped.  Must be 2 or larger.
-        txn_reassembly_count = 16384
+        txn_reassembly_count = 4194304
 
         # QUIC has a handshake process which establishes a secure
         # connection between two endpoints.  The handshake process is
         # very expensive. So we allow only a limited number of
         # handshakes to occur concurrently.
         #
-        max_concurrent_handshakes = 512
+        max_concurrent_handshakes = 4096
 
         # QUIC has a concept of a "QUIC packet", there can be multiple
         # of these inside a UDP packet.  Each QUIC packet we send to the
@@ -914,7 +914,7 @@ dynamic_port_range = "8900-9000"
         #
         # An idle connection will be terminated if it remains idle
         # longer than this threshold.
-        idle_timeout_millis = 60000
+        idle_timeout_millis = 10000
 
         # Max delay for outgoing ACKs.
         ack_delay_millis = 50
@@ -991,7 +991,6 @@ dynamic_port_range = "8900-9000"
         # this option in a production cluster.
         use_consumed_cus = true
 
-
     # The bank tile is what executes transactions and updates the
     # accounting state as a result of any operations performed by the
     # transactions.  Currently the bank tile is implemented by the
@@ -1028,8 +1027,12 @@ dynamic_port_range = "8900-9000"
     [tiles.metric]
         # The address to listen on.  By default metrics are only
         # accessible from the local machine.  If you wish to expose them
-        # to the network, you can change the listen address although it
-        # is not recommended for security reasons.
+        # to the network, you can change the listen address.
+        #
+        # The Firedancer team makes a best effort to secure the metrics
+        # endpoint but exposing it to the internet from a production
+        # validator is not recommended as it increases the attack
+        # surface of the validator.
         prometheus_listen_address = "127.0.0.1"
 
         # The port to listen on for HTTP request for Prometheus metrics.
@@ -1049,12 +1052,17 @@ dynamic_port_range = "8900-9000"
         #   account_indexes = ["program-id"]
         #
         # In your configuration above.
-        enabled = false
+        enabled = true
 
         # The address to listen on.  By default, if enabled, the GUI
         # will only be accessible from the local machine.  If you wish
-        # to expose it to the network, you can change the listen address
-        # although this is not recommended for security reasons.
+        # to expose it to the network, you can change the listen
+        # address.
+        #
+        # The Firedancer team makes a best effort to secure the GUI
+        # endpoint but exposing it to the internet from a production
+        # validator is not recommended as it increases the attack
+        # surface of the validator.
         gui_listen_address = "127.0.0.1"
 
         # The port to listen on.

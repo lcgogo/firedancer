@@ -68,7 +68,7 @@ fd_gui_new( void *             shmem,
   gui->summary.startup_full_snapshot_slot             = 0;
   gui->summary.startup_incremental_snapshot_slot      = 0;
   gui->summary.startup_waiting_for_supermajority_slot = ULONG_MAX;
-  
+
   gui->summary.balance                       = 0UL;
   gui->summary.estimated_slot_duration_nanos = 0UL;
 
@@ -93,9 +93,8 @@ fd_gui_new( void *             shmem,
   memset( gui->summary.txn_waterfall_reference, 0, sizeof(gui->summary.txn_waterfall_reference) );
   memset( gui->summary.txn_waterfall_current,   0, sizeof(gui->summary.txn_waterfall_current) );
 
-  memset( gui->summary.tile_prime_metric_ref, 0, sizeof(gui->summary.tile_prime_metric_ref) );
-  memset( gui->summary.tile_prime_metric_cur, 0, sizeof(gui->summary.tile_prime_metric_cur) );
-  gui->summary.tile_prime_metric_ref[ 0 ].ts_nanos = fd_log_wallclock();
+  memset( gui->summary.tile_stats_reference, 0, sizeof(gui->summary.tile_stats_reference) );
+  memset( gui->summary.tile_stats_current, 0, sizeof(gui->summary.tile_stats_current) );
 
   memset( gui->summary.tile_timers_snap[ 0 ], 0, sizeof(gui->summary.tile_timers_snap[ 0 ]) );
   memset( gui->summary.tile_timers_snap[ 1 ], 0, sizeof(gui->summary.tile_timers_snap[ 1 ]) );
@@ -417,7 +416,7 @@ fd_gui_txn_waterfall_snap( fd_gui_t *               gui,
 
   cur->out.dedup_duplicate = dedup_metrics[ MIDX( COUNTER, DEDUP, TRANSACTION_DEDUP_FAILURE ) ];
 
-  
+
   cur->out.verify_overrun   = 0UL;
   cur->out.verify_duplicate = 0UL;
   cur->out.verify_parse     = 0UL;
@@ -440,25 +439,25 @@ fd_gui_txn_waterfall_snap( fd_gui_t *               gui,
 
 
   cur->out.quic_overrun      = 0UL;
-  cur->out.quic_quic_invalid = 0UL;
-  cur->out.quic_udp_invalid  = 0UL;
+  cur->out.quic_frag_drop    = 0UL;
+  cur->out.quic_frag_drop_g  = 0UL;
+  cur->out.quic_aborted      = 0UL;
+  cur->out.tpu_quic_invalid  = 0UL;
+  cur->out.tpu_udp_invalid   = 0UL;
   for( ulong i=0UL; i<gui->summary.quic_tile_cnt; i++ ) {
     fd_topo_tile_t const * quic = &topo->tiles[ fd_topo_find_tile( topo, "quic", i ) ];
     volatile ulong * quic_metrics = fd_metrics_tile( quic->metrics );
 
-    cur->out.quic_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_PACKET_TOO_SMALL ) ];
-    cur->out.quic_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_PACKET_TOO_LARGE ) ];
-    cur->out.quic_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_REASSEMBLY_PUBLISH_ERROR_OVERSIZE ) ];
-    cur->out.quic_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_REASSEMBLY_PUBLISH_ERROR_SKIP ) ];
-    cur->out.quic_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_REASSEMBLY_PUBLISH_ERROR_STATE ) ];
+    cur->out.tpu_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_PACKET_TOO_SMALL ) ];
+    cur->out.tpu_udp_invalid  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_PACKET_TOO_LARGE ) ];
+    cur->out.tpu_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC_TILE, QUIC_PACKET_TOO_SMALL     ) ];
+    cur->out.tpu_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC,      PKT_CRYPTO_FAILED         ) ];
+    cur->out.tpu_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC,      PKT_NO_CONN               ) ];
 
-    cur->out.quic_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC_TILE, QUIC_PACKET_TOO_SMALL ) ];
-    cur->out.quic_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC_TILE, REASSEMBLY_PUBLISH_ERROR_OVERSIZE ) ];
-    cur->out.quic_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC_TILE, REASSEMBLY_PUBLISH_ERROR_SKIP ) ];
-    cur->out.quic_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC_TILE, REASSEMBLY_PUBLISH_ERROR_STATE ) ];
-    cur->out.quic_quic_invalid += quic_metrics[ MIDX( COUNTER, QUIC_TILE, REASSEMBLY_NOTIFY_ABORTED ) ];
-
-    cur->out.quic_overrun      += quic_metrics[ MIDX( COUNTER, QUIC_TILE, REASSEMBLY_NOTIFY_CLOBBERED ) ];
+    cur->out.quic_frag_drop_g += quic_metrics[ MIDX( COUNTER, QUIC_TILE, TXNS_OVERRUN             ) ];
+    cur->out.quic_frag_drop   += quic_metrics[ MIDX( COUNTER, QUIC,      STREAM_CLOSED_DROP       ) ];
+    cur->out.quic_aborted     += quic_metrics[ MIDX( COUNTER, QUIC,      STREAM_CLOSED_CONN_ABORT ) ];
+    cur->out.quic_aborted     += quic_metrics[ MIDX( COUNTER, QUIC,      STREAM_CLOSED_PEER_RESET ) ];
 
     for( ulong j=0UL; j<gui->summary.net_tile_cnt; j++ ) {
       /* TODO: Not precise... net frags that were skipped might not have been destined for QUIC tile */
@@ -478,63 +477,74 @@ fd_gui_txn_waterfall_snap( fd_gui_t *               gui,
   }
 
   cur->in.gossip   = dedup_metrics[ MIDX( COUNTER, DEDUP, GOSSIPED_VOTES_RECEIVED ) ];
-  cur->in.quic     = cur->out.quic_quic_invalid+cur->out.quic_overrun+cur->out.net_overrun;
-  cur->in.udp      = cur->out.quic_udp_invalid;
+  cur->in.quic     = cur->out.tpu_quic_invalid +
+                     cur->out.quic_overrun +
+                     cur->out.quic_frag_drop +
+                     cur->out.quic_frag_drop_g +
+                     cur->out.quic_aborted +
+                     cur->out.net_overrun;
+  cur->in.udp      = cur->out.tpu_udp_invalid;
   for( ulong i=0UL; i<gui->summary.quic_tile_cnt; i++ ) {
     fd_topo_tile_t const * quic = &topo->tiles[ fd_topo_find_tile( topo, "quic", i ) ];
     volatile ulong * quic_metrics = fd_metrics_tile( quic->metrics );
 
-    cur->in.quic += quic_metrics[ MIDX( COUNTER, QUIC_TILE, REASSEMBLY_PUBLISH_SUCCESS ) ];
-    cur->in.udp  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, NON_QUIC_REASSEMBLY_PUBLISH_SUCCESS ) ];
+    cur->in.quic += quic_metrics[ MIDX( COUNTER, QUIC_TILE, TXNS_RECEIVED_QUIC ) ];
+    cur->in.udp  += quic_metrics[ MIDX( COUNTER, QUIC_TILE, TXNS_RECEIVED_UDP  ) ];
   }
-
-  /* TODO: We can get network packet drops between the device and the
-           kernel ring buffer by querying some network device stats... */
 }
 
 static void
-fd_gui_tile_prime_metric_snap( fd_gui_t *                   gui,
-                               fd_gui_txn_waterfall_t *     w_cur,
-                               fd_gui_tile_prime_metric_t * m_cur ) {
-  fd_topo_t * topo = gui->topo;
+fd_gui_tile_stats_snap( fd_gui_t *                     gui,
+                        fd_gui_txn_waterfall_t const * waterfall,
+                        fd_gui_tile_stats_t *          stats ) {
+  fd_topo_t const * topo = gui->topo;
 
-  m_cur->ts_nanos = fd_log_wallclock();
+  stats->sample_time_nanos = fd_log_wallclock();
 
-  m_cur->net_in_bytes  = 0UL;
-  m_cur->net_out_bytes = 0UL;
+  stats->net_in_rx_bytes  = 0UL;
+  stats->net_out_tx_bytes = 0UL;
   for( ulong i=0UL; i<gui->summary.net_tile_cnt; i++ ) {
     fd_topo_tile_t const * net = &topo->tiles[ fd_topo_find_tile( topo, "net", i ) ];
     volatile ulong * net_metrics = fd_metrics_tile( net->metrics );
 
-    m_cur->net_in_bytes  += net_metrics[ MIDX( COUNTER, NET_TILE, RECEIVED_BYTES ) ];
-    m_cur->net_out_bytes += net_metrics[ MIDX( COUNTER, NET_TILE, SENT_BYTES ) ];
+    stats->net_in_rx_bytes  += net_metrics[ MIDX( COUNTER, NET_TILE, RECEIVED_BYTES ) ];
+    stats->net_out_tx_bytes += net_metrics[ MIDX( COUNTER, NET_TILE, SENT_BYTES ) ];
   }
 
-  m_cur->quic_conns    = 0UL;
+  stats->quic_conn_cnt = 0UL;
   for( ulong i=0UL; i<gui->summary.quic_tile_cnt; i++ ) {
     fd_topo_tile_t const * quic = &topo->tiles[ fd_topo_find_tile( topo, "quic", i ) ];
     volatile ulong * quic_metrics = fd_metrics_tile( quic->metrics );
 
-    m_cur->quic_conns    += quic_metrics[ MIDX( GAUGE, QUIC, CONNECTIONS_ACTIVE ) ];
+    stats->quic_conn_cnt += quic_metrics[ MIDX( GAUGE, QUIC, CONNECTIONS_ACTIVE ) ];
   }
 
-  m_cur->verify_drop_numerator   = w_cur->out.verify_duplicate +
-                                   w_cur->out.verify_parse +
-                                   w_cur->out.verify_failed;
-  m_cur->verify_drop_denominator = w_cur->in.gossip +
-                                   w_cur->in.quic +
-                                   w_cur->in.udp -
-                                   w_cur->out.verify_overrun;
-  m_cur->dedup_drop_numerator    = w_cur->out.dedup_duplicate;
-  m_cur->dedup_drop_denominator  = m_cur->verify_drop_denominator -
-                                   m_cur->verify_drop_numerator;
+  stats->verify_drop_cnt = waterfall->out.verify_duplicate +
+                           waterfall->out.verify_parse +
+                           waterfall->out.verify_failed;
+  stats->verify_total_cnt = waterfall->in.gossip +
+                            waterfall->in.quic +
+                            waterfall->in.udp -
+                            waterfall->out.net_overrun -
+                            waterfall->out.tpu_quic_invalid -
+                            waterfall->out.tpu_udp_invalid -
+                            waterfall->out.quic_aborted -
+                            waterfall->out.quic_frag_drop -
+                            waterfall->out.quic_frag_drop_g -
+                            waterfall->out.quic_overrun -
+                            waterfall->out.verify_overrun;
+  stats->dedup_drop_cnt = waterfall->out.dedup_duplicate;
+  stats->dedup_total_cnt = stats->verify_total_cnt -
+                           waterfall->out.verify_duplicate -
+                            waterfall->out.verify_parse -
+                            waterfall->out.verify_failed;
 
   fd_topo_tile_t const * pack  = &topo->tiles[ fd_topo_find_tile( topo, "pack", 0UL ) ];
-  volatile ulong const * pack_metrics   = fd_metrics_tile( pack->metrics );
-  m_cur->pack_fill_numerator   = pack_metrics[ MIDX( GAUGE, PACK, AVAILABLE_TRANSACTIONS ) ];
-  m_cur->pack_fill_denominator = pack->pack.max_pending_transactions;
+  volatile ulong const * pack_metrics = fd_metrics_tile( pack->metrics );
+  stats->pack_buffer_cnt      = pack_metrics[ MIDX( GAUGE, PACK, AVAILABLE_TRANSACTIONS ) ];
+  stats->pack_buffer_capacity = pack->pack.max_pending_transactions;
 
-  m_cur->bank_txn = w_cur->out.block_fail + w_cur->out.block_success;
+  stats->bank_txn_exec_cnt = waterfall->out.block_fail + waterfall->out.block_success;
 }
 
 int
@@ -557,8 +567,9 @@ fd_gui_poll( fd_gui_t * gui ) {
     fd_gui_printf_live_txn_waterfall( gui, gui->summary.txn_waterfall_reference, gui->summary.txn_waterfall_current, 0UL /* TODO: REAL NEXT LEADER SLOT */ );
     fd_http_server_ws_broadcast( gui->http );
 
-    fd_gui_tile_prime_metric_snap( gui, gui->summary.txn_waterfall_current, gui->summary.tile_prime_metric_cur );
-    fd_gui_printf_live_tile_prime_metric( gui, gui->summary.tile_prime_metric_ref, gui->summary.tile_prime_metric_cur, 0UL ); // TODO: REAL NEXT LEADER SLOT
+    memcpy( gui->summary.tile_stats_reference, gui->summary.tile_stats_current, sizeof(struct fd_gui_tile_stats) );
+    fd_gui_tile_stats_snap( gui, gui->summary.txn_waterfall_current, gui->summary.tile_stats_current );
+    fd_gui_printf_live_tile_stats( gui, gui->summary.tile_stats_reference, gui->summary.tile_stats_current );
     fd_http_server_ws_broadcast( gui->http );
 
     gui->next_sample_100millis += 100L*1000L*1000L;
@@ -583,7 +594,7 @@ fd_gui_handle_gossip_update( fd_gui_t *    gui,
                              uchar const * msg ) {
   ulong const * header = (ulong const *)fd_type_pun_const( msg );
   ulong peer_cnt = header[ 0 ];
-  
+
   FD_TEST( peer_cnt<=40200UL );
 
   ulong added_cnt = 0UL;
@@ -1081,6 +1092,10 @@ fd_gui_handle_slot_start( fd_gui_t * gui,
 
   fd_gui_tile_timers_snap( gui );
   gui->summary.tile_timers_snap_idx_slot_start = (gui->summary.tile_timers_snap_idx+(FD_GUI_TILE_TIMER_SNAP_CNT-1UL))%FD_GUI_TILE_TIMER_SNAP_CNT;
+
+  fd_gui_txn_waterfall_t waterfall[ 1 ];
+  fd_gui_txn_waterfall_snap( gui, waterfall );
+  fd_gui_tile_stats_snap( gui, waterfall, slot->tile_stats_begin );
 }
 
 static void
@@ -1119,11 +1134,10 @@ fd_gui_handle_slot_end( fd_gui_t * gui,
      slot. */
 
   fd_gui_txn_waterfall_snap( gui, slot->waterfall_end );
-  fd_gui_tile_prime_metric_snap( gui, slot->waterfall_end, slot->tile_prime_metric_end );
   memcpy( slot->waterfall_begin, gui->summary.txn_waterfall_reference, sizeof(slot->waterfall_begin) );
   memcpy( gui->summary.txn_waterfall_reference, slot->waterfall_end, sizeof(gui->summary.txn_waterfall_reference) );
-  memcpy( slot->tile_prime_metric_begin, gui->summary.tile_prime_metric_ref, sizeof(slot->tile_prime_metric_begin) );
-  memcpy( gui->summary.tile_prime_metric_ref, slot->tile_prime_metric_end, sizeof(gui->summary.tile_prime_metric_ref) );
+
+  fd_gui_tile_stats_snap( gui, slot->waterfall_end, slot->tile_stats_end );
 }
 
 static void

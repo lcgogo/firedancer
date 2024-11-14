@@ -492,8 +492,11 @@ tranasactions per second.
             "out": {
                 "net_overrun": 1,
                 "quic_overrun": 44,
-                "quic_quic_invalid": 12,
-                "quic_udp_invalid": 13,
+                "quic_frag_drop": 13,
+                "quic_frag_drop_g": 14,
+                "quic_aborted": 15,
+                "tpu_quic_invalid": 16,
+                "tpu_udp_invalid": 17,
                 "verify_overrun": 2059,
                 "verify_parse": 14,
                 "verify_failed": 4092,
@@ -587,21 +590,18 @@ potential underflow.
 | Field               | Type                | Description
 |---------------------|---------------------|------------
 | next_leader_slot    | `number\|null`      | The next leader slot |
-| tile_primary_metric | `TilePrimaryMetric` | Per-tile-type primary metrics.  Some of these are point-in-time values (P), and some are aggregated since the end of the previous leader slot (A) |
+| tile_primary_metric | `TilePrimaryMetric` | Per-tile-type primary metrics.  Some of these are point-in-time values (P), and some are 1-second moving window averages (W) |
 
 **`TilePrimaryMetric`**
 | Field   | Type     | Description |
 |---------|----------|-------------|
-| net_in  | `number` | Ingress bytes per second (P) |
+| net_in  | `number` | Ingress bytes per second (W) |
 | quic    | `number` | Active QUIC connections (P) |
-| verify  | `number` | Fraction of transactions that failed sigverify (A) |
-| dedup   | `number` | Fraction of transactions deduplicated (A) |
+| verify  | `number` | Fraction of transactions that failed sigverify (W) |
+| dedup   | `number` | Fraction of transactions deduplicated (W) |
 | pack    | `number` | Fraction of pack buffer filled (P) |
-| bank    | `number` | Execution TPS (P) |
-| poh     | `number` | Fraction of time spent hashing (P) |
-| shred   | `number` | Shreds processed per second (P) |
-| store   | `number` | 50% percentile latency (A) |
-| net_out | `number` | Egress bytes per second (P) |
+| bank    | `number` | Execution TPS (W) |
+| net_out | `number` | Egress bytes per second (W) |
 
 
 #### `summary.live_tile_timers`
@@ -931,7 +931,7 @@ are skipped on the currently active fork.
 |---------------------|---------------------------|-------------|
 | publish             | `SlotPublish`             | General information about the slot |
 | waterfall           | `TxnWaterfall\|null`      | If the slot is not `mine`, will be `null`. Otherwise, a waterfall showing reasons transactions were acquired since the end of the prior leader slot |
-| tile_primary_metric | `TilePrimaryMetric\|null` | If the slot is not `mine`, will be `null`. Otherwise, per-tile-type primary metrics since the end of the prior leader slot |
+| tile_primary_metric | `TilePrimaryMetric\|null` | If the slot is not `mine`, will be `null`. Otherwise, max value of per-tile-type primary metrics since the end of the prior leader slot |
 
 #### `slot.query`
 | frequency   | type           | example |
@@ -981,8 +981,11 @@ are skipped on the currently active fork.
             "out": {
                 "net_overrun": 0,
                 "quic_overrun": 0,
-                "quic_quic_invalid": 0,
-                "quic_udp_invalid": 0,
+                "quic_frag_drop": 0,
+                "quic_frag_drop_g": 0,
+                "quic_aborted": 0,
+                "tpu_quic_invalid": 0,
+                "tpu_udp_invalid": 0,
                 "verify_overrun": 0,
                 "verify_parse": 0,
                 "verify_failed": 0,
@@ -1065,7 +1068,7 @@ are skipped on the currently active fork.
 |---------------------|---------------------------|-------------|
 | publish             | `SlotPublish`             | General information about the slot |
 | waterfall           | `TxnWaterfall\|null`      | If the slot is not `mine`, will be `null`. Otherwise, a waterfall showing reasons transactions were acquired since the end of the prior leader slot |
-| tile_primary_metric | `TilePrimaryMetric\|null` | If the slot is not `mine`, will be `null`. Otherwise, per-tile-type primary metrics since the end of the prior leader slot |
+| tile_primary_metric | `TilePrimaryMetric\|null` | If the slot is not `mine`, will be `null`. Otherwise, max value of per-tile-type primary metrics since the end of the prior leader slot |
 | tile_timers         | `TsTileTimers[]\|null`    | If the slot is not `mine`, will be `null`. Otherwise, an array of `TsTileTimers` samples from the slot, sorted earliest to latest. We store this information for the most recently completed 4096 leader slots. This will be `null` for leader slots before that |
 
 **`TxnWaterfall`**
@@ -1087,8 +1090,11 @@ are skipped on the currently active fork.
 |-------------------|----------|-------------|
 | net_overrun       | `number` | Transactions were dropped because the net tile couldn't keep with incoming network packets. It is unclear how many transactions would have been produced by the packets that were dropped, and this counter (along with the corresponding counter for the `in` side) assumes one tranaction per dropped packet |
 | quic_overrun      | `number` | Transactions were dropped because the QUIC tile couldn't keep with incoming network packets. It is unclear how many transactions would have been produced by the fragments from net that were overrun, and this counter (along with the corresponding counter for the `in` side) assumes one tranaction per dropped packet |
-| quic_quic_invalid | `number` | Transactions were dropped because the QUIC tile decided that incoming QUIC packets were not valid. It is unclear how many transactions would have been produced by the packets that were invalid, and this counter (along with the corresponding counter for the `in` side) assumes one tranaction per invalid packet |
-| quic_udp_invalid  | `number` | Transactions were dropped because the QUIC tile decided that incoming non-QUIC (regular UDP) packets were not valid. |
+| quic_frag_drop    | `number` | Transactions were dropped because of too many active streams per connection. |
+| quic_frag_drop_g  | `number` | Transactions were dropped because of too many active streams across all connections. |
+| quic_aborted      | `number` | Transactions were dropped because the request was aborted (connection closed or peer cancelled the request). |
+| tpu_quic_invalid  | `number` | Transactions were dropped because the QUIC tile decided that incoming QUIC packets were not valid. It is unclear how many transactions would have been produced by the packets that were invalid, and this counter (along with the corresponding counter for the `in` side) assumes one tranaction per invalid packet |
+| tpu_udp_invalid   | `number` | Transactions were dropped because the QUIC tile decided that incoming non-QUIC (regular UDP) packets were not valid. |
 | verify_overrun    | `number` | Transactions were dropped because the verify tiles could not verify them quickly enough |
 | verify_parse      | `number` | Transactions were dropped because they were malformed and failed to parse |
 | verify_failed     | `number` | Transactions were dropped because signature verification failed |

@@ -204,15 +204,16 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
     }
     prev_filename[ len ] = '\0';
 
-
     char new_filename[ FD_SNAPSHOT_DIR_MAX ];
     snprintf( new_filename, FD_SNAPSHOT_DIR_MAX, "%s/%s", ctx->out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
 
     rename( prev_filename, new_filename );
 
-    FD_TEST( 0 == fd_snapshot_create_new_snapshot( &snapshot_ctx ) );
+    if( FD_UNLIKELY( fd_snapshot_create_new_snapshot( &snapshot_ctx ) ) ) {
+      FD_LOG_ERR(( "Failed to create a new snapshot" ));
+    }
 
-    FD_LOG_ERR(("ASDF ASDF ASDF"));
+    FD_LOG_NOTICE(( "Done creating a snapshot" ));
 
     fd_fseq_update( ctx->is_constipated, 0UL );
 

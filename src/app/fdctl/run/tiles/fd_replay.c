@@ -250,6 +250,7 @@ struct fd_replay_tile_ctx {
 
   ulong snapshot_interval;
   ulong * is_constipated;
+  ulong prev_snapshot_gap;
 };
 typedef struct fd_replay_tile_ctx fd_replay_tile_ctx_t;
 
@@ -632,7 +633,15 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
 
   FD_LOG_WARNING(("PUBLISHING SLOT %lu", smr));
 
-  if( smr%ctx->snapshot_interval==0UL && fd_fseq_query( ctx->is_constipated)==0UL ) {
+
+  /* We are ready for a snapshot if either we are on or just passed a snapshot
+     interval and no snapshot is currently in progress. */
+
+  ulong curr_snapshot_gap = smr % ctx->snapshot_interval;
+  int is_snapshot_ready = curr_snapshot_gap < ctx->prev_snapshot_gap && fd_fseq_query( ctx->is_constipated ) == 0;
+  ctx->prev_snapshot_gap = curr_snapshot_gap;
+
+  if( is_snapshot_ready ) {
     FD_LOG_WARNING(("CONSTIPATING AFTER ROOTING SLOT %lu", smr));
     fd_fseq_update( ctx->is_constipated, smr );
     FD_TEST( fd_fseq_query( ctx->is_constipated ) != 0 );

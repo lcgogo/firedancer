@@ -1136,7 +1136,13 @@ fd_quic_stream_fin( fd_quic_stream_t * stream ) {
 
 void
 fd_quic_conn_set_rx_max_data( fd_quic_conn_t * conn, ulong rx_max_data ) {
-  conn->rx_max_data = rx_max_data;
+  /* cannot reduce max_data, and cannot increase beyond max varint */
+  if( rx_max_data > conn->rx_max_data && rx_max_data < (1UL<<62)-1UL ) {
+    conn->rx_max_data    = rx_max_data;
+    conn->flags         |= FD_QUIC_CONN_FLAGS_MAX_DATA;
+    conn->upd_pkt_number = FD_QUIC_PKT_NUM_PENDING;
+    fd_quic_svc_schedule1( conn, FD_QUIC_SVC_INSTANT );
+  }
 }
 
 /* packet processing */
@@ -1510,6 +1516,7 @@ fd_quic_handle_v1_initial( fd_quic_t *               quic,
     } else {
       /* connection may have been torn down */
       FD_DEBUG( FD_LOG_DEBUG(( "unknown connection ID" )); )
+      quic->metrics.pkt_no_conn_cnt++;
       return FD_QUIC_PARSE_FAIL;
     }
   }
@@ -1544,7 +1551,7 @@ fd_quic_handle_v1_initial( fd_quic_t *               quic,
       conn->state = FD_QUIC_CONN_STATE_DEAD;
       fd_quic_svc_schedule( state, conn, FD_QUIC_SVC_INSTANT );
       quic->metrics.conn_aborted_cnt++;
-      quic->metrics.conn_err_tls_fail_cnt++;
+      quic->metrics.pkt_decrypt_fail_cnt++;
       return FD_QUIC_PARSE_FAIL;
     }
 # endif /* !FD_QUIC_DISABLE_CRYPTO */
@@ -1579,7 +1586,7 @@ fd_quic_handle_v1_initial( fd_quic_t *               quic,
                                   pkt_number,
                                   &conn->keys[enc_level][!server] ) != FD_QUIC_SUCCESS ) ) {
       FD_DEBUG( FD_LOG_DEBUG(( "fd_quic_crypto_decrypt failed" )) );
-      quic->metrics.conn_err_tls_fail_cnt++;
+      quic->metrics.pkt_decrypt_fail_cnt++;
       return FD_QUIC_PARSE_FAIL;
     }
 # endif /* FD_QUIC_DISABLE_CRYPTO */
@@ -1656,11 +1663,12 @@ fd_quic_handle_v1_handshake(
   uint const enc_level = fd_quic_enc_level_handshake_id;
 
   if( FD_UNLIKELY( !conn ) ) {
-    /* this can happen */
+    quic->metrics.pkt_no_conn_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 
   if( FD_UNLIKELY( !fd_uint_extract_bit( conn->keys_avail, (int)enc_level ) ) ) {
+    quic->metrics.pkt_decrypt_fail_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 
@@ -1708,7 +1716,7 @@ fd_quic_handle_v1_handshake(
         fd_quic_crypto_decrypt_hdr( cur_ptr, cur_sz,
                                     pn_offset,
                                     &conn->keys[enc_level][!server] ) != FD_QUIC_SUCCESS ) ) {
-    quic->metrics.conn_err_tls_fail_cnt++;
+    quic->metrics.pkt_decrypt_fail_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 # endif /* !FD_QUIC_DISABLE_CRYPTO */
@@ -1741,7 +1749,7 @@ fd_quic_handle_v1_handshake(
                                 &conn->keys[enc_level][!server] ) != FD_QUIC_SUCCESS ) ) {
     /* remove connection from map, and insert into free list */
     FD_DEBUG( FD_LOG_DEBUG(( "fd_quic_crypto_decrypt failed" )) );
-    quic->metrics.conn_err_tls_fail_cnt++;
+    quic->metrics.pkt_decrypt_fail_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 # endif /* FD_QUIC_DISABLE_CRYPTO */
@@ -1817,6 +1825,7 @@ fd_quic_handle_v1_retry(
   }
 
   if( FD_UNLIKELY( !conn ) ) {
+    quic->metrics.pkt_no_conn_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 
@@ -1908,7 +1917,7 @@ fd_quic_handle_v1_one_rtt( fd_quic_t *           quic,
                            uchar *         const cur_ptr,
                            ulong           const tot_sz ) {
   if( !conn ) {
-    /* this can happen */
+    quic->metrics.pkt_no_conn_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 
@@ -1932,6 +1941,7 @@ fd_quic_handle_v1_one_rtt( fd_quic_t *           quic,
   /* generate one_rtt secrets, keys etc */
 
   if( FD_UNLIKELY( !fd_uint_extract_bit( conn->keys_avail, (int)enc_level ) ) ) {
+    quic->metrics.pkt_decrypt_fail_cnt++;
     return FD_QUIC_PARSE_FAIL;
   }
 
@@ -1952,7 +1962,7 @@ fd_quic_handle_v1_one_rtt( fd_quic_t *           quic,
                                       pn_offset,
                                       &conn->keys[enc_level][!server] ) != FD_QUIC_SUCCESS ) ) {
       FD_DEBUG( FD_LOG_DEBUG(( "fd_quic_crypto_decrypt_hdr failed" )) );
-      quic->metrics.conn_err_tls_fail_cnt++;
+      quic->metrics.pkt_decrypt_fail_cnt++;
       return FD_QUIC_PARSE_FAIL;
     }
 # endif /* !FD_QUIC_DISABLE_CRYPTO */
@@ -2017,7 +2027,7 @@ fd_quic_handle_v1_one_rtt( fd_quic_t *           quic,
                                   keys ) != FD_QUIC_SUCCESS ) ) {
       /* remove connection from map, and insert into free list */
       FD_DEBUG( FD_LOG_DEBUG(( "fd_quic_crypto_decrypt failed" )) );
-      quic->metrics.conn_err_tls_fail_cnt++;
+      quic->metrics.pkt_decrypt_fail_cnt++;
       return FD_QUIC_PARSE_FAIL;
     }
 # endif /* !FD_QUIC_DISABLE_CRYPTO */
@@ -2157,6 +2167,7 @@ fd_quic_process_quic_packet_v1( fd_quic_t *     quic,
     entry = fd_quic_conn_map_query( state->conn_map, dst_conn_id, NULL );
     if( FD_UNLIKELY( !entry ) ) {
       FD_DEBUG( FD_LOG_DEBUG(( "one_rtt failed: no connection found" )) );
+      quic->metrics.pkt_no_conn_cnt++;
       return FD_QUIC_PARSE_FAIL;
     }
 
@@ -3813,7 +3824,6 @@ fd_quic_conn_tx( fd_quic_t *      quic,
       conn->state = FD_QUIC_CONN_STATE_DEAD;
       fd_quic_svc_schedule( state, conn, FD_QUIC_SVC_INSTANT );
       quic->metrics.conn_aborted_cnt++;
-      quic->metrics.conn_err_tls_fail_cnt++;
       break;
     }
 
@@ -5355,6 +5365,7 @@ fd_quic_frame_handle_stream_frame(
   /* stream id is an old one, assume a retransmit and ack */
   if( FD_UNLIKELY( stream_id < old_min_stream_id ) ) {
     FD_DEBUG( FD_LOG_DEBUG(( "Ignoring old stream ID" )); )
+    quic->metrics.stream_stale_event_cnt++;
     return data_sz;
   }
 
@@ -5381,6 +5392,7 @@ fd_quic_frame_handle_stream_frame(
     if( !stream ) {
       /* Tombstone map record to prevent duplicate deliveries. */
       FD_DEBUG( FD_LOG_DEBUG(( "Ignoring stream frame that was already completed" )); )
+      quic->metrics.stream_stale_event_cnt++;
       return data_sz;
     }
 
@@ -5479,14 +5491,6 @@ fd_quic_frame_handle_stream_frame(
         exp_offset,
         data->fin_opt
     );
-
-    /* send a max data update
-       must do this before the stream-fin flags are checked */
-    conn->rx_max_data   += delivered;
-    conn->flags         |= FD_QUIC_CONN_FLAGS_MAX_DATA;
-    conn->upd_pkt_number = FD_QUIC_PKT_NUM_PENDING;
-
-    //fd_quic_svc_schedule1( conn, FD_QUIC_SVC_INSTANT );
 
     /* update data received */
     stream->rx_tot_data = exp_offset + delivered;

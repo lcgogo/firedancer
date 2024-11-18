@@ -1417,6 +1417,84 @@ int fd_slot_pair_encode( fd_slot_pair_t const * self, fd_bincode_encode_ctx_t * 
   if( FD_UNLIKELY( err ) ) return err;
   return FD_BINCODE_SUCCESS;
 }
+enum {
+  fd_slot_pair_slot_TAG = (0 << 6) | FD_ARCHIVE_META_ULONG,
+  fd_slot_pair_val_TAG = (1 << 6) | FD_ARCHIVE_META_ULONG,
+};
+int fd_slot_pair_decode_archival( fd_slot_pair_t * self, fd_bincode_decode_ctx_t * ctx ) {
+  void const * data = ctx->data;
+  int err = fd_slot_pair_decode_archival_preflight( ctx );
+  if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
+  ctx->data = data;
+  if( !fd_is_null_alloc_virtual( ctx->valloc ) ) {
+    fd_slot_pair_new( self );
+  }
+  fd_slot_pair_decode_archival_unsafe( self, ctx );
+  return FD_BINCODE_SUCCESS;
+}
+int fd_slot_pair_decode_archival_preflight( fd_bincode_decode_ctx_t * ctx ) {
+  int err;
+  ushort tag = FD_ARCHIVE_META_SENTINAL;
+  void * offset = NULL;
+  for(;;) {
+  err = fd_bincode_uint16_decode( &tag, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  if( FD_UNLIKELY( tag == FD_ARCHIVE_META_SENTINAL ) ) break;
+  switch( tag ) {
+  case (ushort)fd_slot_pair_slot_TAG: {
+  err = fd_bincode_uint64_decode_preflight( ctx );
+  if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
+  break;
+  }
+  case (ushort)fd_slot_pair_val_TAG: {
+  err = fd_bincode_uint64_decode_preflight( ctx );
+  if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
+  break;
+  }
+  default:
+    err = fd_archive_decode_skip_field( ctx, tag );
+    if( FD_UNLIKELY( err ) ) return err;
+    break;
+  }
+  }
+  return FD_BINCODE_SUCCESS;
+}
+void fd_slot_pair_decode_archival_unsafe( fd_slot_pair_t * self, fd_bincode_decode_ctx_t * ctx ) {
+  ushort tag = FD_ARCHIVE_META_SENTINAL;
+  void * offset = NULL;
+  for(;;) {
+  fd_bincode_uint16_decode( &tag, ctx );
+  if( FD_UNLIKELY( tag == FD_ARCHIVE_META_SENTINAL ) ) break;
+  switch( tag ) {
+  case (ushort)fd_slot_pair_slot_TAG: {
+  fd_bincode_uint64_decode_unsafe( &self->slot, ctx );
+  break;
+  }
+  case (ushort)fd_slot_pair_val_TAG: {
+  fd_bincode_uint64_decode_unsafe( &self->val, ctx );
+  break;
+  }
+  default:
+    fd_archive_decode_skip_field( ctx, tag );
+    break;
+  }
+  }
+}
+int fd_slot_pair_encode_archival( fd_slot_pair_t const * self, fd_bincode_encode_ctx_t * ctx ) {
+  int err;
+  void * offset = NULL;
+  err = fd_bincode_uint16_encode( (ushort)fd_slot_pair_slot_TAG, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint64_encode( self->slot, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint16_encode( (ushort)fd_slot_pair_val_TAG, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint64_encode( self->val, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint16_encode( FD_ARCHIVE_META_SENTINAL, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  return FD_BINCODE_SUCCESS;
+}
 int fd_slot_pair_decode_offsets( fd_slot_pair_off_t * self, fd_bincode_decode_ctx_t * ctx ) {
   uchar const * data = ctx->data;
   int err;
@@ -1495,6 +1573,100 @@ int fd_hard_forks_encode( fd_hard_forks_t const * self, fd_bincode_encode_ctx_t 
       if( FD_UNLIKELY( err ) ) return err;
     }
   }
+  return FD_BINCODE_SUCCESS;
+}
+enum {
+  fd_hard_forks_hard_forks_TAG = (0 << 6) | FD_ARCHIVE_META_VECTOR,
+};
+int fd_hard_forks_decode_archival( fd_hard_forks_t * self, fd_bincode_decode_ctx_t * ctx ) {
+  void const * data = ctx->data;
+  int err = fd_hard_forks_decode_archival_preflight( ctx );
+  if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
+  ctx->data = data;
+  if( !fd_is_null_alloc_virtual( ctx->valloc ) ) {
+    fd_hard_forks_new( self );
+  }
+  fd_hard_forks_decode_archival_unsafe( self, ctx );
+  return FD_BINCODE_SUCCESS;
+}
+int fd_hard_forks_decode_archival_preflight( fd_bincode_decode_ctx_t * ctx ) {
+  int err;
+  ushort tag = FD_ARCHIVE_META_SENTINAL;
+  void * offset = NULL;
+  for(;;) {
+  err = fd_bincode_uint16_decode( &tag, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  if( FD_UNLIKELY( tag == FD_ARCHIVE_META_SENTINAL ) ) break;
+  switch( tag ) {
+  case (ushort)fd_hard_forks_hard_forks_TAG: {
+  err = fd_archive_decode_setup_length( ctx, &offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  ulong hard_forks_len;
+  err = fd_bincode_uint64_decode( &hard_forks_len, ctx );
+  if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
+  if( hard_forks_len ) {
+    for( ulong i=0; i < hard_forks_len; i++ ) {
+      err = fd_slot_pair_decode_archival_preflight( ctx );
+      if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
+    }
+  }
+  err = fd_archive_decode_check_length( ctx, offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  break;
+  }
+  default:
+    err = fd_archive_decode_skip_field( ctx, tag );
+    if( FD_UNLIKELY( err ) ) return err;
+    break;
+  }
+  }
+  return FD_BINCODE_SUCCESS;
+}
+void fd_hard_forks_decode_archival_unsafe( fd_hard_forks_t * self, fd_bincode_decode_ctx_t * ctx ) {
+  ushort tag = FD_ARCHIVE_META_SENTINAL;
+  void * offset = NULL;
+  for(;;) {
+  fd_bincode_uint16_decode( &tag, ctx );
+  if( FD_UNLIKELY( tag == FD_ARCHIVE_META_SENTINAL ) ) break;
+  switch( tag ) {
+  case (ushort)fd_hard_forks_hard_forks_TAG: {
+  fd_archive_decode_setup_length( ctx, &offset );
+  fd_bincode_uint64_decode_unsafe( &self->hard_forks_len, ctx );
+  if( self->hard_forks_len ) {
+    self->hard_forks = (fd_slot_pair_t *)fd_valloc_malloc( ctx->valloc, FD_SLOT_PAIR_ALIGN, FD_SLOT_PAIR_FOOTPRINT*self->hard_forks_len );
+    for( ulong i=0; i < self->hard_forks_len; i++ ) {
+      fd_slot_pair_new( self->hard_forks + i );
+      fd_slot_pair_decode_archival_unsafe( self->hard_forks + i, ctx );
+    }
+  } else
+    self->hard_forks = NULL;
+  break;
+  }
+  default:
+    fd_archive_decode_skip_field( ctx, tag );
+    break;
+  }
+  }
+}
+int fd_hard_forks_encode_archival( fd_hard_forks_t const * self, fd_bincode_encode_ctx_t * ctx ) {
+  int err;
+  void * offset = NULL;
+  err = fd_bincode_uint16_encode( (ushort)fd_hard_forks_hard_forks_TAG, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_archive_encode_setup_length( ctx, &offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint64_encode( self->hard_forks_len, ctx );
+  if( FD_UNLIKELY(err) ) return err;
+  if( self->hard_forks_len ) {
+    for( ulong i=0; i < self->hard_forks_len; i++ ) {
+      err = fd_slot_pair_encode_archival( self->hard_forks + i, ctx );
+      if( FD_UNLIKELY( err ) ) return err;
+    }
+  }
+  err = fd_archive_encode_set_length( ctx, offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint16_encode( FD_ARCHIVE_META_SENTINAL, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
   return FD_BINCODE_SUCCESS;
 }
 int fd_hard_forks_decode_offsets( fd_hard_forks_off_t * self, fd_bincode_decode_ctx_t * ctx ) {
@@ -15451,6 +15623,8 @@ int fd_slot_bank_decode_preflight( fd_bincode_decode_ctx_t * ctx ) {
       if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
     }
   }
+  err = fd_hard_forks_decode_preflight( ctx );
+  if( FD_UNLIKELY( err ) ) return err;
   return FD_BINCODE_SUCCESS;
 }
 void fd_slot_bank_decode_unsafe( fd_slot_bank_t * self, fd_bincode_decode_ctx_t * ctx ) {
@@ -15487,6 +15661,7 @@ void fd_slot_bank_decode_unsafe( fd_slot_bank_t * self, fd_bincode_decode_ctx_t 
       fd_bincode_uint64_decode_unsafe( &self->use_preceeding_epoch_stakes, ctx );
     }
   }
+  fd_hard_forks_decode_unsafe( &self->hard_forks, ctx );
 }
 int fd_slot_bank_encode( fd_slot_bank_t const * self, fd_bincode_encode_ctx_t * ctx ) {
   int err;
@@ -15546,6 +15721,8 @@ int fd_slot_bank_encode( fd_slot_bank_t const * self, fd_bincode_encode_ctx_t * 
     err = fd_bincode_uint64_encode( self->use_preceeding_epoch_stakes, ctx );
     if( FD_UNLIKELY( err ) ) return err;
   }
+  err = fd_hard_forks_encode( &self->hard_forks, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
   return FD_BINCODE_SUCCESS;
 }
 enum {
@@ -15575,6 +15752,7 @@ enum {
   fd_slot_bank_parent_signature_cnt_TAG = (23 << 6) | FD_ARCHIVE_META_ULONG,
   fd_slot_bank_tick_height_TAG = (24 << 6) | FD_ARCHIVE_META_ULONG,
   fd_slot_bank_use_preceeding_epoch_stakes_TAG = (25 << 6) | FD_ARCHIVE_META_OPTION,
+  fd_slot_bank_hard_forks_TAG = (26 << 6) | FD_ARCHIVE_META_STRUCT,
 };
 int fd_slot_bank_decode_archival( fd_slot_bank_t * self, fd_bincode_decode_ctx_t * ctx ) {
   void const * data = ctx->data;
@@ -15789,6 +15967,15 @@ int fd_slot_bank_decode_archival_preflight( fd_bincode_decode_ctx_t * ctx ) {
   if( FD_UNLIKELY( err ) ) return err;
   break;
   }
+  case (ushort)fd_slot_bank_hard_forks_TAG: {
+  err = fd_archive_decode_setup_length( ctx, &offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_hard_forks_decode_archival_preflight( ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_archive_decode_check_length( ctx, offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  break;
+  }
   default:
     err = fd_archive_decode_skip_field( ctx, tag );
     if( FD_UNLIKELY( err ) ) return err;
@@ -15927,6 +16114,11 @@ void fd_slot_bank_decode_archival_unsafe( fd_slot_bank_t * self, fd_bincode_deco
       fd_bincode_uint64_decode_unsafe( &self->use_preceeding_epoch_stakes, ctx );
     }
   }
+  break;
+  }
+  case (ushort)fd_slot_bank_hard_forks_TAG: {
+  fd_archive_decode_setup_length( ctx, &offset );
+  fd_hard_forks_decode_archival_unsafe( &self->hard_forks, ctx );
   break;
   }
   default:
@@ -16102,6 +16294,14 @@ int fd_slot_bank_encode_archival( fd_slot_bank_t const * self, fd_bincode_encode
   }
   err = fd_archive_encode_set_length( ctx, offset );
   if( FD_UNLIKELY( err ) ) return err;
+  err = fd_bincode_uint16_encode( (ushort)fd_slot_bank_hard_forks_TAG, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_archive_encode_setup_length( ctx, &offset );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_hard_forks_encode_archival( &self->hard_forks, ctx );
+  if( FD_UNLIKELY( err ) ) return err;
+  err = fd_archive_encode_set_length( ctx, offset );
+  if( FD_UNLIKELY( err ) ) return err;
   err = fd_bincode_uint16_encode( FD_ARCHIVE_META_SENTINAL, ctx );
   if( FD_UNLIKELY( err ) ) return err;
   return FD_BINCODE_SUCCESS;
@@ -16194,6 +16394,9 @@ int fd_slot_bank_decode_offsets( fd_slot_bank_off_t * self, fd_bincode_decode_ct
       if( FD_UNLIKELY( err!=FD_BINCODE_SUCCESS ) ) return err;
     }
   }
+  self->hard_forks_off = (uint)( (ulong)ctx->data - (ulong)data );
+  err = fd_hard_forks_decode_preflight( ctx );
+  if( FD_UNLIKELY( err ) ) return err;
   return FD_BINCODE_SUCCESS;
 }
 void fd_slot_bank_new(fd_slot_bank_t * self) {
@@ -16211,6 +16414,7 @@ void fd_slot_bank_new(fd_slot_bank_t * self) {
   fd_slot_lthash_new( &self->lthash );
   fd_block_hash_queue_new( &self->block_hash_queue );
   fd_hash_new( &self->prev_banks_hash );
+  fd_hard_forks_new( &self->hard_forks );
 }
 void fd_slot_bank_destroy( fd_slot_bank_t * self, fd_bincode_destroy_ctx_t * ctx ) {
   fd_recent_block_hashes_destroy( &self->recent_block_hashes, ctx );
@@ -16229,6 +16433,7 @@ void fd_slot_bank_destroy( fd_slot_bank_t * self, fd_bincode_destroy_ctx_t * ctx
   if( self->has_use_preceeding_epoch_stakes ) {
     self->has_use_preceeding_epoch_stakes = 0;
   }
+  fd_hard_forks_destroy( &self->hard_forks, ctx );
 }
 
 ulong fd_slot_bank_footprint( void ){ return FD_SLOT_BANK_FOOTPRINT; }
@@ -16266,6 +16471,7 @@ void fd_slot_bank_walk( void * w, fd_slot_bank_t const * self, fd_types_walk_fn_
   } else {
     fun( w, &self->use_preceeding_epoch_stakes, "use_preceeding_epoch_stakes", FD_FLAMENCO_TYPE_ULONG, "ulong", level );
   }
+  fd_hard_forks_walk( w, &self->hard_forks, fun, "hard_forks", level );
   fun( w, self, name, FD_FLAMENCO_TYPE_MAP_END, "fd_slot_bank", level-- );
 }
 ulong fd_slot_bank_size( fd_slot_bank_t const * self ) {
@@ -16299,6 +16505,7 @@ ulong fd_slot_bank_size( fd_slot_bank_t const * self ) {
   if( self->has_use_preceeding_epoch_stakes ) {
     size += sizeof(ulong);
   }
+  size += fd_hard_forks_size( &self->hard_forks );
   return size;
 }
 

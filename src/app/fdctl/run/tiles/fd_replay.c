@@ -597,12 +597,15 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
 
   if( FD_LIKELY( !is_constipated ) ) {
 
+    FD_LOG_WARNING(("PUBLISHING SLOT %lu", smr));
+
     ulong rc = fd_funk_txn_publish( ctx->funk, root_txn, 1 );
     if( FD_UNLIKELY( !rc ) ) {
       FD_LOG_ERR(( "failed to funk publish slot %lu", smr ));
     }
     
   } else {
+    FD_LOG_WARNING(("CONSTIPATED PUBLISHING SLOT %lu", smr));
     /* If the parent of the current transaction is not NULL, then we will
        publish into the parent. Otherwise we know that this transaction is
        the new constipated root. */

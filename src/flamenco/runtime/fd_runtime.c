@@ -2326,6 +2326,8 @@ int fd_runtime_block_execute_finalize(fd_exec_slot_ctx_t *slot_ctx,
   //   return result;
   // }
 
+  FD_LOG_WARNING(("HARD FORKS LENGTH %lu", slot_ctx->slot_bank.hard_forks.hard_forks_len));
+
   result = fd_runtime_save_slot_bank(slot_ctx);
   if( result != FD_RUNTIME_EXECUTE_SUCCESS ) {
     FD_LOG_WARNING(("failed to save slot bank"));
@@ -2366,6 +2368,8 @@ fd_runtime_block_execute_finalize_tpool( fd_exec_slot_ctx_t * slot_ctx,
   //   FD_LOG_WARNING(( "save epoch bank failed" ));
   //   return result;
   // }
+
+  FD_LOG_WARNING(("HARD FORKS LENGTH %lu", slot_ctx->slot_bank.hard_forks.hard_forks_len));
 
   result = fd_runtime_save_slot_bank(slot_ctx);
   if( result != FD_RUNTIME_EXECUTE_SUCCESS ) {
@@ -2853,7 +2857,7 @@ fd_runtime_publish_old_txns( fd_exec_slot_ctx_t * slot_ctx,
     if( ++depth == (FD_RUNTIME_NUM_ROOT_BLOCKS - 1 ) ) {
       FD_LOG_DEBUG(("publishing %s (slot %lu)", FD_BASE58_ENC_32_ALLOCA( &txn->xid ), txn->xid.ul[0]));
 
-      if( slot_ctx->status_cache && slot_ctx->epoch_ctx->constipate_root==0 ) {
+      if( slot_ctx->status_cache && !fd_txncache_get_is_constipated( slot_ctx->status_cache ) ) {
         FD_LOG_WARNING(("REGISTERING ROOT %lu", txn->xid.ul[0] ));
         fd_txncache_register_root_slot( slot_ctx->status_cache, txn->xid.ul[0] );
       } else if( slot_ctx->status_cache ) {
@@ -2868,6 +2872,7 @@ fd_runtime_publish_old_txns( fd_exec_slot_ctx_t * slot_ctx,
         fd_funk_txn_t *p = fd_funk_txn_parent( txn, txnmap );
         if( p != NULL ) {
           slot_ctx->root_slot = txn->xid.ul[0];
+          FD_LOG_WARNING(("CONSTIPATED PUBLISH"));
           if( fd_funk_txn_publish_into_parent(funk, txn, 1) == FD_FUNK_SUCCESS ) {
             publish_err = 1;
           }
@@ -2880,6 +2885,7 @@ fd_runtime_publish_old_txns( fd_exec_slot_ctx_t * slot_ctx,
         if( slot_ctx->root_slot == slot_ctx->snapshot_slot ) {
           FD_LOG_WARNING(("CONSTIPATING"));
           slot_ctx->epoch_ctx->constipate_root = 1;
+          fd_txncache_set_is_constipated( slot_ctx->status_cache, 1 );
         }
         FD_LOG_WARNING(("PUBLISH for slot %lu", txn->xid.ul[0]));;
       }
@@ -2983,6 +2989,8 @@ fd_runtime_block_eval_tpool( fd_exec_slot_ctx_t * slot_ctx,
 
   /* progress to next slot next time */
   slot_ctx->blockstore->smr++;
+
+  FD_LOG_WARNING(("HARD FORKS LENGTH %lu", slot_ctx->slot_bank.hard_forks.hard_forks_len));
 
   fd_funk_start_write( slot_ctx->acc_mgr->funk );
   fd_runtime_save_slot_bank( slot_ctx );
@@ -3358,6 +3366,10 @@ fd_runtime_collect_rent_from_account( fd_exec_slot_ctx_t const * slot_ctx,
                                       fd_account_meta_t *        acc,
                                       fd_pubkey_t const *        key,
                                       ulong                      epoch ) {
+
+  if( !memcmp(key, &fd_sysvar_last_restart_slot_id, sizeof(fd_pubkey_t)) ) {
+    FD_LOG_WARNING(("PURR"));
+  }
 
   if( !FD_FEATURE_ACTIVE( slot_ctx, disable_rent_fees_collection ) ) {
     return fd_runtime_collect_from_existing_account( slot_ctx, acc, key, epoch );

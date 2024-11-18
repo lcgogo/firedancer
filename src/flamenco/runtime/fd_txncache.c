@@ -157,6 +157,9 @@ struct __attribute__((aligned(FD_TXNCACHE_ALIGN))) fd_txncache_private {
                                   array, assuming that the latest slots were constipated 
                                   and not flushed. */
 
+  int   is_constipated;        /* Is the status cache in a constipated*/
+  ulong is_constipated_off;
+
   ulong magic; /* ==FD_TXNCACHE_MAGIC */
 };
 
@@ -597,7 +600,9 @@ fd_txncache_flush_constipated_slots( fd_txncache_t * tc ) {
   for( ulong i=0UL; i<tc->constipated_slots_cnt; i++ ) {
     fd_txncache_register_root_slot_private( tc, constipated_slots[ i ] );
   }
+  tc->constipated_slots_cnt = 0UL;
 
+  tc->is_constipated = 0;
 
   fd_rwlock_unwrite( tc->lock );
 
@@ -1129,4 +1134,26 @@ fd_txncache_get_entries( fd_txncache_t * tc,
 
   return 0;
 
+}
+
+int
+fd_txncache_get_is_constipated( fd_txncache_t * tc ) {
+  fd_rwlock_read( tc->lock );
+
+  int is_constipated = tc->is_constipated;
+
+  fd_rwlock_unread( tc->lock );
+
+  return is_constipated;
+}
+
+int
+fd_txncache_set_is_constipated( fd_txncache_t * tc, int is_constipated ) {
+  fd_rwlock_read( tc->lock );
+
+  tc->is_constipated = is_constipated;
+
+  fd_rwlock_unread( tc->lock );
+
+  return 0;
 }

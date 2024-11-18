@@ -135,10 +135,8 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
     FD_LOG_ERR(( "failed to create snapshot" ));
   }
   FD_LOG_NOTICE(("Successfully produced a snapshot at directory=%s", ledger_args->snapshot_dir ));
-  //return 0;
 
   ledger_args->slot_ctx->epoch_ctx->constipate_root = 0;
-  fd_txncache_flush_constipated_slots( ledger_args->slot_ctx->status_cache );
 
 }
 

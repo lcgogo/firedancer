@@ -543,7 +543,6 @@ fdctl_obj_new( fd_topo_t const *     topo,
     fd_funk_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("txn_max"), VAL("rec_max") );
   } else if( FD_UNLIKELY( !strcmp( obj->name, "txncache" ) ) ) {
     fd_txncache_new( laddr, VAL("max_rooted_slots"), VAL("max_live_slots"), VAL("max_txn_per_slot"), 0UL );
-    FD_TEST( fd_funk_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("txn_max"), VAL("rec_max") ) );
   } else {
     FD_LOG_ERR(( "unknown object `%s`", obj->name ));
   }

@@ -63,6 +63,8 @@ fd_sysvar_last_restart_slot_read( fd_sol_sysvar_last_restart_slot_t * result,
 void
 fd_sysvar_last_restart_slot_update( fd_exec_slot_ctx_t * slot_ctx ) {
 
+  FD_LOG_WARNING(("LAST RESTART SLOT UPDATE"));
+
   /* https://github.com/solana-labs/solana/blob/v1.18.18/runtime/src/bank.rs#L2093-L2095 */
   if( !FD_FEATURE_ACTIVE( slot_ctx, last_restart_slot_sysvar ) ) return;
 
@@ -82,6 +84,7 @@ fd_sysvar_last_restart_slot_update( fd_exec_slot_ctx_t * slot_ctx ) {
 
   /* https://github.com/solana-labs/solana/blob/v1.18.18/runtime/src/bank.rs#L2122-L2130 */
   if( !has_current_last_restart_slot || current_last_restart_slot != last_restart_slot ) {
+    FD_LOG_WARNING(("SETTING SYSVAR %lu %lu %d", current_last_restart_slot, last_restart_slot, has_current_last_restart_slot));
     fd_sysvar_set(
         slot_ctx, fd_sysvar_owner_id.key,
         &fd_sysvar_last_restart_slot_id,

@@ -471,11 +471,7 @@ fd_snapshot_create_populate_bank( fd_snapshot_ctx_t *                snapshot_ct
 
   bank->parent_slot                           = snapshot_ctx->slot - 1UL;
 
-  /* Hard forks can be omitted as it is not needed to boot off of both clients */
-
-  bank->hard_forks.hard_forks                 = NULL;
-  bank->hard_forks.hard_forks_len             = 0UL;
-
+  bank->hard_forks                            = slot_bank->hard_forks;
   bank->transaction_count                     = slot_bank->transaction_count;
   bank->signature_count                       = slot_bank->parent_signature_cnt;
   bank->capitalization                        = slot_bank->capitalization;
@@ -727,6 +723,8 @@ fd_snapshot_create_write_status_cache( fd_snapshot_ctx_t *  snapshot_ctx ) {
     return -1;
   }
 
+  fd_txncache_flush_constipated_slots( snapshot_ctx->status_cache );
+
   return 0;
 
   } FD_SCRATCH_SCOPE_END;
@@ -938,6 +936,8 @@ fd_snapshot_create_new_snapshot( fd_snapshot_ctx_t * snapshot_ctx ) {
 
   int err = 0;
 
+  FD_LOG_WARNING(("ENTERING SNAPSHOT CREATION"));
+
   /* Validate that the snapshot_ctx is setup correctly */
 
   err = fd_snapshot_create_setup_and_validate_ctx( snapshot_ctx );
@@ -965,6 +965,8 @@ fd_snapshot_create_new_snapshot( fd_snapshot_ctx_t * snapshot_ctx ) {
   if( FD_UNLIKELY( err ) ) {
     return err;
   }
+
+  FD_LOG_WARNING(("DONE WRITING THE STATUS CACHE"));
 
   /* Populate and write out the manifest and append vecs. */
 

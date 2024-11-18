@@ -228,7 +228,6 @@ fd_topo_initialize( config_t * config ) {
   /**/                 fd_topob_link( topo, "poh_shred",    "poh_shred",    0,        16384UL,                                  USHORT_MAX,                    1UL   );
   /**/                 fd_topob_link( topo, "pack_replay",  "pack_replay",  0,        65536UL,                                  USHORT_MAX,                    1UL   );
   /**/                 fd_topob_link( topo, "poh_pack",     "replay_poh",   0,        128UL,                                    sizeof(fd_became_leader_t) ,   1UL   );
-  /**/                 fd_topob_link( topo, "poh_replay",   "poh_replay",   0,        128UL,                                    USHORT_MAX,                    1UL   ); /* TODO: not properly sized yet */
 
   /**/                 fd_topob_link( topo, "replay_voter", "replay_voter", 0,        128UL,                                    FD_TPU_DCACHE_MTU,             1UL   );
   /**/                 fd_topob_link( topo, "voter_gossip", "voter_gossip", 0,        128UL,                                    FD_TXN_MTU,                    1UL   );

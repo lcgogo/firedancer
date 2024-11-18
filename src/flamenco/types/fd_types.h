@@ -2672,6 +2672,7 @@ struct __attribute__((aligned(128UL))) fd_slot_bank {
   ulong tick_height;
   ulong use_preceeding_epoch_stakes;
   uchar has_use_preceeding_epoch_stakes;
+  fd_hard_forks_t hard_forks;
 };
 typedef struct fd_slot_bank fd_slot_bank_t;
 #define FD_SLOT_BANK_FOOTPRINT sizeof(fd_slot_bank_t)
@@ -2704,6 +2705,7 @@ struct __attribute__((aligned(128UL))) fd_slot_bank_off {
   uint parent_signature_cnt_off;
   uint tick_height_off;
   uint use_preceeding_epoch_stakes_off;
+  uint hard_forks_off;
 };
 typedef struct fd_slot_bank_off fd_slot_bank_off_t;
 #define FD_SLOT_BANK_OFF_FOOTPRINT sizeof(fd_slot_bank_off_t)
@@ -5207,6 +5209,10 @@ void fd_slot_pair_walk( void * w, fd_slot_pair_t const * self, fd_types_walk_fn_
 ulong fd_slot_pair_size( fd_slot_pair_t const * self );
 ulong fd_slot_pair_footprint( void );
 ulong fd_slot_pair_align( void );
+int fd_slot_pair_decode_archival( fd_slot_pair_t * self, fd_bincode_decode_ctx_t * ctx );
+int fd_slot_pair_decode_archival_preflight( fd_bincode_decode_ctx_t * ctx );
+void fd_slot_pair_decode_archival_unsafe( fd_slot_pair_t * self, fd_bincode_decode_ctx_t * ctx );
+int fd_slot_pair_encode_archival( fd_slot_pair_t const * self, fd_bincode_encode_ctx_t * ctx );
 
 void fd_hard_forks_new( fd_hard_forks_t * self );
 int fd_hard_forks_decode( fd_hard_forks_t * self, fd_bincode_decode_ctx_t * ctx );
@@ -5219,6 +5225,10 @@ void fd_hard_forks_walk( void * w, fd_hard_forks_t const * self, fd_types_walk_f
 ulong fd_hard_forks_size( fd_hard_forks_t const * self );
 ulong fd_hard_forks_footprint( void );
 ulong fd_hard_forks_align( void );
+int fd_hard_forks_decode_archival( fd_hard_forks_t * self, fd_bincode_decode_ctx_t * ctx );
+int fd_hard_forks_decode_archival_preflight( fd_bincode_decode_ctx_t * ctx );
+void fd_hard_forks_decode_archival_unsafe( fd_hard_forks_t * self, fd_bincode_decode_ctx_t * ctx );
+int fd_hard_forks_encode_archival( fd_hard_forks_t const * self, fd_bincode_encode_ctx_t * ctx );
 
 void fd_inflation_new( fd_inflation_t * self );
 int fd_inflation_decode( fd_inflation_t * self, fd_bincode_decode_ctx_t * ctx );

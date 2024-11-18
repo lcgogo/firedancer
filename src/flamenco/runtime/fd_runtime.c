@@ -2882,7 +2882,7 @@ fd_runtime_publish_old_txns( fd_exec_slot_ctx_t * slot_ctx,
       } else {
         slot_ctx->root_slot = txn->xid.ul[0];
         publish_err = fd_funk_txn_publish(funk, txn, 1);
-        if( slot_ctx->root_slot == slot_ctx->snapshot_slot ) {
+        if( slot_ctx->root_slot % slot_ctx->snapshot_freq == 0 ) {
           FD_LOG_WARNING(("CONSTIPATING"));
           slot_ctx->epoch_ctx->constipate_root = 1;
           fd_txncache_set_is_constipated( slot_ctx->status_cache, 1 );

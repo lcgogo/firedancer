@@ -94,7 +94,7 @@ struct fd_ledger_args {
   uint                  cluster_version[3];      /* What version of solana is the genesis block? */
   char const *          one_off_features[32];    /* List of one off feature pubkeys to enable for execution agnostic of cluster version */
   uint                  one_off_features_cnt;    /* Number of one off features */
-  ulong                 snapshot_slot;           /* Slot to create a snapshot at */
+  ulong                 snapshot_freq;           /* How often a snapshot should be produced */
   char const *          snapshot_dir;            /* Directory to create a snapshot in */
   ulong                 snapshot_tcnt;           /* Number of threads to use for snapshot creation */
 
@@ -144,7 +144,7 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
 static int
 init_tpool( fd_ledger_args_t * ledger_args ) {
 
-  ulong snapshot_tcnt = ledger_args->snapshot_slot != ULONG_MAX ? ledger_args->snapshot_tcnt : 0UL;
+  ulong snapshot_tcnt = ledger_args->snapshot_freq != ULONG_MAX ? ledger_args->snapshot_tcnt : 0UL;
 
   ulong tcnt = fd_tile_cnt() - snapshot_tcnt;
   uchar * tpool_scr_mem = NULL;
@@ -281,14 +281,14 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
     ulong   sz  = blk->data_sz;
     fd_blockstore_end_read( blockstore );
 
-    if( ledger_args->slot_ctx->root_slot==ledger_args->snapshot_slot && !is_snapshotting ) {
+    if( ledger_args->slot_ctx->root_slot%ledger_args->snapshot_freq==0UL && !is_snapshotting ) {
 
       uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
 
       is_snapshotting = 1;
 
       fd_snapshot_ctx_t snapshot_ctx = {
-        .slot           = ledger_args->snapshot_slot,
+        .slot           = ledger_args->slot_ctx->root_slot,
         .out_dir        = ledger_args->snapshot_dir,
         .is_incremental = 0,
         .valloc         = fd_scratch_virtual(),
@@ -513,6 +513,8 @@ fd_ledger_main_setup( fd_ledger_args_t * args ) {
 
   fd_runtime_recover_banks( args->slot_ctx, 0, args->genesis==NULL );
 
+  args->slot_ctx->snapshot_freq = args->snapshot_freq;
+
   /* Finish other runtime setup steps */
   fd_funk_start_write( funk );
   fd_features_restore( args->slot_ctx );
@@ -520,8 +522,6 @@ fd_ledger_main_setup( fd_ledger_args_t * args ) {
   fd_calculate_epoch_accounts_hash_values( args->slot_ctx );
   fd_bpf_scan_and_create_bpf_program_cache_entry( args->slot_ctx, args->slot_ctx->funk_txn );
   fd_funk_end_write( funk );
-
-  args->slot_ctx->snapshot_slot = args->snapshot_slot;
 
   /* Allocate memory for the account scratch space. In live execution, each of
      the spad allocations should be tied to its respective execution thread.
@@ -1465,7 +1465,7 @@ initial_setup( int argc, char ** argv, fd_ledger_args_t * args ) {
   char const * checkpt_status_cache    = fd_env_strip_cmdline_cstr ( &argc, &argv, "--checkpt-status-cache",    NULL, NULL      );
   char const * one_off_features        = fd_env_strip_cmdline_cstr ( &argc, &argv, "--one-off-features",        NULL, NULL      );
   char const * lthash                  = fd_env_strip_cmdline_cstr ( &argc, &argv, "--lthash",                  NULL, "false"   );
-  ulong        snapshot_slot           = fd_env_strip_cmdline_ulong( &argc, &argv, "--snapshot-slot",           NULL, ULONG_MAX );
+  ulong        snapshot_freq           = fd_env_strip_cmdline_ulong( &argc, &argv, "--snapshot-freq",           NULL, ULONG_MAX );
   char const * snapshot_dir            = fd_env_strip_cmdline_cstr ( &argc, &argv, "--snapshot-dir",            NULL, NULL      );
   ulong        snapshot_tcnt           = fd_env_strip_cmdline_ulong( &argc, &argv, "--snapshot-tcnt",           NULL, 2UL       );
 
@@ -1564,7 +1564,7 @@ initial_setup( int argc, char ** argv, fd_ledger_args_t * args ) {
   args->rocksdb_list_cnt        = 0UL;
   args->checkpt_status_cache    = checkpt_status_cache;
   args->one_off_features_cnt    = 0UL;
-  args->snapshot_slot           = snapshot_slot;
+  args->snapshot_freq           = snapshot_freq;
   args->snapshot_dir            = snapshot_dir;
   args->snapshot_tcnt           = snapshot_tcnt;
   parse_one_off_features( args, one_off_features );

@@ -63,8 +63,6 @@ fd_sysvar_last_restart_slot_read( fd_sol_sysvar_last_restart_slot_t * result,
 void
 fd_sysvar_last_restart_slot_update( fd_exec_slot_ctx_t * slot_ctx ) {
 
-  FD_LOG_WARNING(("LAST RESTART SLOT UPDATE"));
-
   /* https://github.com/solana-labs/solana/blob/v1.18.18/runtime/src/bank.rs#L2093-L2095 */
   if( !FD_FEATURE_ACTIVE( slot_ctx, last_restart_slot_sysvar ) ) return;
 

@@ -304,8 +304,6 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
 
   /* Pass in the hard forks */
 
-  FD_LOG_WARNING(("HARD FORKS LENGTH %lu", oldbank->hard_forks.hard_forks_len));
-
   /* The hard forks should be deep copied over.
      TODO:This should be in the epoch bank and not the slot bank. */
   slot_bank->hard_forks                = oldbank->hard_forks;

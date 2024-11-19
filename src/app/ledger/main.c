@@ -207,6 +207,8 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
   ulong prev_slot  = ledger_args->slot_ctx->slot_bank.slot;
   ulong start_slot = ledger_args->slot_ctx->slot_bank.slot + 1;
 
+  ledger_args->slot_ctx->root_slot = prev_slot;
+
   /* On demand rocksdb ingest */
   fd_rocksdb_t           rocks_db         = {0};
   fd_rocksdb_root_iter_t iter             = {0};

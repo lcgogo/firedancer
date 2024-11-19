@@ -1691,8 +1691,8 @@ fd_runtime_finalize_txns_update_blockstore_meta( fd_exec_slot_ctx_t *         sl
 
   fd_blockstore_t * blockstore      = slot_ctx->blockstore;
   fd_wksp_t * blockstore_wksp       = fd_blockstore_wksp( blockstore );
-  fd_alloc_t * blockstore_alloc     = blockstore->alloc;
-  fd_txn_map_t * txn_map = blockstore->txn_map;
+  fd_alloc_t * blockstore_alloc     = fd_blockstore_alloc( blockstore );
+  fd_txn_map_t * txn_map = fd_blockstore_txn_map( blockstore );
 
   /* Get the total size of all logs */
   ulong tot_meta_sz = 2*sizeof(ulong);
@@ -3155,7 +3155,7 @@ fd_runtime_calculate_fee(fd_exec_txn_ctx_t *txn_ctx,
     fd_pubkey_t *program_id = &txn_ctx->accounts[txn_instr->program_id];
     if (memcmp(program_id->uc, fd_solana_keccak_secp_256k_program_id.key, sizeof(fd_pubkey_t)) == 0 ||
         memcmp(program_id->uc, fd_solana_ed25519_sig_verify_program_id.key, sizeof(fd_pubkey_t)) == 0 ||
-        memcmp(program_id->uc, fd_solana_secp256r1_program_id.key, sizeof(fd_pubkey_t)) == 0)
+        (memcmp(program_id->uc, fd_solana_secp256r1_program_id.key, sizeof(fd_pubkey_t)) == 0  && FD_FEATURE_ACTIVE( txn_ctx->slot_ctx, enable_secp256r1_precompile )))
     {
       if (txn_instr->data_sz == 0)
       {

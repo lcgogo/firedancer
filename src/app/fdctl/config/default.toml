@@ -689,10 +689,10 @@ dynamic_port_range = "8900-9000"
     # validator is not dropping incoming QUIC transactions from clients.
     #
     # On modern hardware, each verify tile can handle around 20-40K
-    # transactions per second.  Six tiles seems to be enough to handle
+    # transactions per second.  Eight tiles seems to be enough to handle
     # current `mainnet-beta` traffic, unless the validator is under a
     # denial of service or spam attack.
-    verify_tile_count = 6
+    verify_tile_count = 8
 
     # How many bank tiles to run.  Should be set to 4.  Bank tiles
     # execute transactions, so the validator can include the results of
@@ -928,6 +928,12 @@ dynamic_port_range = "8900-9000"
     # transactions, making sure that the data is well-formed, and that
     # it is signed by the appropriate private key.
     [tiles.verify]
+        # The verify tiles have a cache of signatures they have seen
+        # recently, used to discard duplicate transactions before they
+        # get verified to save signature verification resources.  See
+        # [tiles.dedup.signature_cache_size] below for more information.
+        signature_cache_size = 4194302
+
         # The maximum number of messages in-flight between a QUIC tile
         # and associated verify tile, after which earlier messages might
         # start being overwritten, and get dropped so that the system
@@ -949,33 +955,23 @@ dynamic_port_range = "8900-9000"
         # is available, it can make sense to increase this cache size to
         # protect against denial of service from high volumes of
         # transaction spam.
-        signature_cache_size = 4194302
+        #
+        # The default value here, 2^26 - 2 is a good balance, as it fits
+        # in 1GiB of memory using a single gigantic page.
+        signature_cache_size = 33554430
 
     # The pack tile takes incoming transactions that have been verified
     # by the verify tile and then deduplicated, and attempts to order
     # them in an optimal way to generate the most fees per compute
     # resource used to execute them.
     [tiles.pack]
-        # The pack tile may process transactions faster than the Agave
-        # bank stage that sits downstream of it.  If this happens,
-        # the pack tile will accumulate a buffer of transactions that
-        # need to be forwarded, up to this limit after which the least
-        # profitable transactions will be dropped.
-        #
-        # If a lot of memory is available, it may be more sensible to
-        # continue to queue inbound transactions rather than drop them,
-        # for two reasons,
-        #
-        #  (1) If transactions were received in a burst, we may be able
-        #      to handle them later while idle and earn more rewards.
-        #
-        #  (2) If many highly profitable transactions are received in a
-        #      burst, we may drop some when later they would be better
-        #      to execute than what is available.
-        #
-        # This option specifies how many transactions will be buffered
-        # in the pack tile.
-        max_pending_transactions = 4096
+        # The pack tile receives transactions while it is waiting to
+        # become leader and stores them for future execution.  This
+        # option determines the maximum number of transactions that
+        # will be stored before those with the lowest estimated
+        # profitability get dropped.  The maximum allowed, and default
+        # value is 65534 and it is not recommended to change this.
+        max_pending_transactions = 65534
 
         # When a transaction consumes fewer CUs than it requests, the
         # bank and pack tiles work together to adjust the block limits

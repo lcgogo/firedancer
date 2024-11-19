@@ -134,12 +134,12 @@ fetch () {
   checkout_repo zstd      https://github.com/facebook/zstd          "v1.5.6"
   checkout_repo lz4       https://github.com/lz4/lz4                "v1.9.4"
   checkout_repo secp256k1 https://github.com/bitcoin-core/secp256k1 "v0.5.0"
+  checkout_repo s2n       https://github.com/awslabs/s2n-bignum     "" "efa579c"
   #checkout_repo openssl   https://github.com/openssl/openssl        "openssl-3.3.1"
   if [[ $DEVMODE == 1 ]]; then
     checkout_repo rocksdb   https://github.com/facebook/rocksdb       "v9.4.0"
     checkout_repo snappy    https://github.com/google/snappy          "1.2.1"
     checkout_repo luajit    https://github.com/LuaJIT/LuaJIT          "v2.0.5"
-    checkout_repo s2n       https://github.com/awslabs/s2n-bignum     "" "efa579c"
   fi
 }
 
@@ -292,7 +292,11 @@ check () {
         echo "[+] Installing rustup"
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
         source "$HOME/.cargo/env"
-        rustup toolchain add 1.75.0
+        rust_toolchain=$(grep "channel" agave/rust-toolchain.toml | awk '{print $NF}' | tr -d '"')
+        if [[ ! $(rustup toolchain list | grep $rust_toolchain) ]]; then
+          echo "[+] Updating rustup toolchain"
+          rustup toolchain add $rust_toolchain
+        fi
         ;;
       *)
         echo "[-] Skipping rustup install"
@@ -532,11 +536,11 @@ install () {
   ( install_zstd      )
   ( install_lz4       )
   ( install_secp256k1 )
+  ( install_s2n       )
   #( install_openssl   )
   if [[ $DEVMODE == 1 ]]; then
     ( install_snappy    )
     ( install_rocksdb   )
-    ( install_s2n       )
   fi
 
   # Merge lib64 with lib

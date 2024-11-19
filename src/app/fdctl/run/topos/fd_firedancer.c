@@ -62,6 +62,7 @@ setup_topo_txncache( fd_topo_t *  topo,
 static fd_topo_obj_t *
 setup_topo_funk( fd_topo_t *  topo,
                  char const * wksp_name, 
+                 char const * funk_file,
                  ulong        funk_rec_max,
                  ulong        funk_sz_gb,
                  ulong        funk_txn_max ) {
@@ -71,18 +72,18 @@ setup_topo_funk( fd_topo_t *  topo,
   ulong seed;
   FD_TEST( sizeof(ulong) == getrandom( &seed, sizeof(ulong), 0 ) );
 
-  ulong loose_sz = funk_sz_gb * 1000000000;
-  FD_LOG_WARNING(("LOOSE SZ %lu", loose_sz));
+  ulong loose_sz = funk_sz_gb * (1<<30);
 
-  FD_TEST( fd_pod_insertf_ulong( topo->props, 2UL,          "obj.%lu.wksp_tag",   obj->id ) );
-  FD_TEST( fd_pod_insertf_ulong( topo->props, seed,         "obj.%lu.seed",       obj->id ) );
-  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_rec_max, "obj.%lu.rec_max", obj->id ) );
-  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_sz_gb,   "obj.%lu.sz_gb",   obj->id ) );
-  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_txn_max, "obj.%lu.txn_max", obj->id ) );
-  FD_TEST( fd_pod_insertf_ulong( topo->props, loose_sz,     "obj.%lu.loose",      obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, 2UL,          "obj.%lu.wksp_tag",  obj->id ) );
+  FD_TEST( fd_pod_insertf_cstr ( topo->props, funk_file,    "obj.%lu.funk_file", obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, seed,         "obj.%lu.seed",      obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_rec_max, "obj.%lu.rec_max",   obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_sz_gb,   "obj.%lu.sz_gb",     obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, funk_txn_max, "obj.%lu.txn_max",   obj->id ) );
+  FD_TEST( fd_pod_insertf_ulong( topo->props, loose_sz,     "obj.%lu.loose",     obj->id ) );
 
-
-  FD_LOG_WARNING(("REC MAX TXN MAX %lu %lu", funk_rec_max, funk_txn_max));
+  /* TODO: As a note, not all of these parameters are currently being used.
+     Currently only non-filemapped funk can be used. */
 
   return obj;
 
@@ -304,7 +305,12 @@ fd_topo_initialize( config_t * config ) {
   FD_TEST( fd_pod_insertf_ulong( topo->props, blockstore_obj->id, "blockstore" ) );
 
   /* Create a shared funk to be used by replay and snapshot. */
-  fd_topo_obj_t * funk_obj = setup_topo_funk( topo, "funkspace", config->tiles.replay.funk_rec_max, config->tiles.replay.funk_sz_gb, config->tiles.replay.funk_txn_max );
+  fd_topo_obj_t * funk_obj = setup_topo_funk( topo, 
+                                              "funkspace", 
+                                              config->tiles.replay.funk_file, 
+                                              config->tiles.replay.funk_rec_max,
+                                              config->tiles.replay.funk_sz_gb, 
+                                              config->tiles.replay.funk_txn_max );
   fd_topob_tile_uses( topo, replay_tile, funk_obj, FD_SHMEM_JOIN_MODE_READ_WRITE );
   fd_topob_tile_uses( topo, snaps_tile,  funk_obj, FD_SHMEM_JOIN_MODE_READ_ONLY );
 

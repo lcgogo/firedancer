@@ -518,6 +518,11 @@ fdctl_obj_new( fd_topo_t const *     topo,
       if( FD_UNLIKELY( __x==ULONG_MAX ) ) FD_LOG_ERR(( "obj.%lu.%s was not set", obj->id, name )); \
       __x; }))
 
+  #define VAL_STR(name) (__extension__({                                                            \
+      char const * __x = fd_pod_queryf_cstr( topo->props, NULL, "obj.%lu.%s", obj->id, name ); \
+      if( FD_UNLIKELY( __x==NULL ) ) FD_LOG_ERR(( "obj.%lu.%s was not set", obj->id, name ));       \
+      __x; }))
+
   void * laddr = fd_topo_obj_laddr( topo, obj->id );
 
   if( FD_UNLIKELY( !strcmp( obj->name, "tile" ) ) ) {
@@ -539,9 +544,19 @@ fdctl_obj_new( fd_topo_t const *     topo,
   } else if( FD_UNLIKELY( !strcmp( obj->name, "blockstore" ) ) ) {
     FD_TEST( fd_blockstore_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("shred_max"), VAL("block_max"), VAL("txn_max") ) );
   } else if( FD_UNLIKELY( !strcmp( obj->name, "funk" ) ) ) {
-    fd_funk_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("txn_max"), VAL("rec_max") );
+    /* TODO:FIXME: turn this into a file-mapped funk. */
+    FD_TEST( fd_funk_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("txn_max"), VAL("rec_max") ) );
+    // fd_funk_t * funk =  fd_funk_open_file( VAL_STR("funk_file"),
+    //                             VAL("wksp_tag"),
+    //                             VAL("seed"),
+    //                             VAL("txn_max"),
+    //                             VAL("rec_max"),
+    //                             VAL("sz_gb") * (1UL<<30),
+    //                             FD_FUNK_OVERWRITE,
+    //                             NULL );
+
   } else if( FD_UNLIKELY( !strcmp( obj->name, "txncache" ) ) ) {
-    fd_txncache_new( laddr, VAL("max_rooted_slots"), VAL("max_live_slots"), VAL("max_txn_per_slot"), 0UL );
+    FD_TEST( fd_txncache_new( laddr, VAL("max_rooted_slots"), VAL("max_live_slots"), VAL("max_txn_per_slot"), FD_TXNCACHE_DEFAULT_MAX_CONSTIPATED_SLOTS ) );
   } else {
     FD_LOG_ERR(( "unknown object `%s`", obj->name ));
   }

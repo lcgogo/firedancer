@@ -344,14 +344,19 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
   do {
     ulong epoch = fd_slot_to_epoch( &epoch_bank->epoch_schedule, slot_bank->slot, NULL );
 
+
     /* Find EpochStakes object matching epoch */
+
     fd_epoch_epoch_stakes_pair_t * epochs  = oldbank->epoch_stakes;
     fd_epoch_stakes_t *            stakes0 = NULL;  /* current */
     fd_epoch_stakes_t *            stakes1 = NULL;  /* next */
+    fd_epoch_stakes_t *            stakes2 = NULL;  /* prev */
     slot_ctx->slot_bank.has_use_preceeding_epoch_stakes = 1;
     slot_ctx->slot_bank.use_preceeding_epoch_stakes     = epoch + 2UL;
 
     for( ulong i=0UL; i < manifest->bank.epoch_stakes_len; i++ ) {
+      if( epochs[i].key == epoch-1UL )
+        stakes2 = &epochs[i].value;
       if( epochs[i].key == epoch )
         stakes0 = &epochs[i].value;
       if( epochs[i].key == epoch+1UL )
@@ -368,6 +373,15 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
         slot_ctx->slot_bank.has_use_preceeding_epoch_stakes = 0;
       }
     }
+
+    /* This is a hack to use the most recent stakes when future epoch stakes
+       are not provided. */
+
+    if( FD_UNLIKELY( !stakes1 && stakes0 && stakes2 ) ) {
+      stakes1 = stakes0;
+      stakes0 = stakes2;
+    }
+
     if( FD_UNLIKELY( (!stakes0) | (!stakes1) ) ) {
       FD_LOG_WARNING(( "snapshot missing EpochStakes for epochs %lu and/or %lu", epoch, epoch+1UL ));
       return 0;

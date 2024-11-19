@@ -534,7 +534,8 @@ fd_snapshot_create_populate_bank( fd_snapshot_ctx_t *                snapshot_ct
 
   /* The firedancer runtime currently maintains a version of the stakes which
      can't be reserialized into a format that is compatible with the Solana
-     snapshot format. Therefore, we must recompute the data structure. */
+     snapshot format. Therefore, we must recompute the data structure using
+     the pubkeys from the stakes cache that is currently in the epoch context. */
 
   int err = fd_snapshot_create_serialiable_stakes( snapshot_ctx, &epoch_bank->stakes, &bank->stakes );
   if( FD_UNLIKELY( err ) ) {

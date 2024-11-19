@@ -299,7 +299,7 @@ fd_bpf_scan_and_create_bpf_program_cache_entry_tpool( fd_exec_slot_ctx_t * slot_
         rec_cnt++;
       }
 
-      fd_tpool_exec_all_block( tpool, 0, fd_tpool_worker_cnt( tpool ) - 1UL, fd_bpf_scan_task, recs, slot_ctx, is_bpf_program, 1, 0, rec_cnt );
+      fd_tpool_exec_all_block( tpool, 0, fd_tpool_worker_cnt( tpool ), fd_bpf_scan_task, recs, slot_ctx, is_bpf_program, 1, 0, rec_cnt );
 
       for( ulong i = 0; i<rec_cnt; i++ ) {
         if( !is_bpf_program[ i ] ) {

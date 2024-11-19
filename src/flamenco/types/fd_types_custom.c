@@ -191,7 +191,6 @@ void fd_solana_vote_account_decode_unsafe( fd_solana_vote_account_t * self, fd_b
   fd_bincode_uint64_decode_unsafe( &self->lamports, ctx );
   ulong data_len;
   fd_bincode_uint64_decode_unsafe( &data_len, ctx );
-
   if( data_len ) {
     FD_SCRATCH_SCOPE_BEGIN {
       /* Deserialize content */

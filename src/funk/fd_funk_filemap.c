@@ -247,7 +247,7 @@ fd_funk_open_file( const char * filename,
 
   } else {
 
-    /* Join the data existiing structures */
+    /* Join the data existing structures */
 
     fd_wksp_t * wksp = fd_wksp_join( shmem );
     if( FD_UNLIKELY( !wksp ) ) {

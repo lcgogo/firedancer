@@ -1937,3 +1937,34 @@ fd_bpf_loader_program_execute( fd_exec_instr_ctx_t * ctx ) {
     return execute( ctx, prog, is_deprecated );
   } FD_SCRATCH_SCOPE_END;
 }
+
+
+/* Public APIs */
+
+int
+fd_directly_invoke_loader_v3_deploy( fd_exec_slot_ctx_t * slot_ctx,
+                                     const fd_pubkey_t *  program_id,
+                                     const uchar *        programdata,
+                                     ulong                programdata_size ) {
+  /* Set up a dummy instr and txn context */
+  fd_exec_txn_ctx_t * txn_ctx = fd_exec_txn_ctx_join( fd_exec_txn_ctx_new( fd_scratch_alloc( FD_EXEC_TXN_CTX_ALIGN, FD_EXEC_TXN_CTX_FOOTPRINT ) ) );
+  fd_exec_txn_ctx_from_exec_slot_ctx( slot_ctx, txn_ctx );
+  fd_exec_txn_ctx_setup_basic( txn_ctx );
+  txn_ctx->instr_stack_sz = 1;
+  fd_exec_instr_ctx_t * instr_ctx = &txn_ctx->instr_stack[0];
+  *instr_ctx = (fd_exec_instr_ctx_t) {
+    .instr     = NULL,
+    .txn_ctx   = txn_ctx,
+    .epoch_ctx = txn_ctx->epoch_ctx,
+    .slot_ctx  = txn_ctx->slot_ctx,
+    .valloc    = fd_scratch_virtual(),
+    .acc_mgr   = txn_ctx->acc_mgr,
+    .funk_txn  = txn_ctx->funk_txn,
+    .parent    = NULL,
+    .index     = 0U,
+    .depth     = 0U,
+    .child_cnt = 0U,
+  };
+
+  return deploy_program( instr_ctx, programdata, programdata_size );
+}

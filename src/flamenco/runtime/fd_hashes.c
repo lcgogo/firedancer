@@ -1018,6 +1018,7 @@ fd_accounts_hash( fd_funk_t          * funk,
 
     fd_valloc_free( valloc, lthash_values );
   } else {
+    FD_LOG_ERR(("MAKE IT IN HERE"));
     ulong num_lists = fd_tpool_worker_cnt( tpool );
     FD_LOG_NOTICE(( "launching %lu hash tasks", num_lists ));
     fd_pubkey_hash_pair_list_t lists[num_lists];
@@ -1033,7 +1034,7 @@ fd_accounts_hash( fd_funk_t          * funk,
       .lists = lists,
       .lthash_values = lthash_values,
       .valloc = valloc };
-    fd_tpool_exec_all_rrobin( tpool, 0, num_lists, fd_accounts_sorted_subrange_task, &task_info, NULL, NULL, 1, 0, num_lists );
+    fd_tpool_exec_all_rrobin( tpool, 0UL, num_lists, fd_accounts_sorted_subrange_task, &task_info, NULL, NULL, 1, 0, num_lists );
     fd_hash_account_deltas( lists, num_lists, accounts_hash );
     for( ulong i = 0; i < num_lists; ++i ) {
       fd_valloc_free( valloc, lists[i].pairs );
@@ -1153,6 +1154,7 @@ fd_snapshot_service_hash( fd_hash_t       * accounts_hash,
                           fd_slot_bank_t  * slot_bank,
                           fd_epoch_bank_t * epoch_bank,
                           fd_funk_t       * funk,
+                          fd_tpool_t      * tpool,
                           fd_valloc_t       valloc ) {
 
 
@@ -1165,7 +1167,7 @@ fd_snapshot_service_hash( fd_hash_t       * accounts_hash,
   fd_hash_t hash;
   if( should_include_eah ) {
     fd_sha256_t h;
-    fd_accounts_hash( funk, slot_bank, valloc, NULL, &hash );
+    fd_accounts_hash( funk, slot_bank, valloc, tpool, &hash );
 
     fd_sha256_init( &h );
     fd_sha256_append( &h, (uchar const *) hash.hash, sizeof( fd_hash_t ) );
@@ -1173,7 +1175,7 @@ fd_snapshot_service_hash( fd_hash_t       * accounts_hash,
     fd_sha256_fini( &h, accounts_hash );
 
   } else {
-    fd_accounts_hash( funk, slot_bank, valloc, NULL, accounts_hash );
+    fd_accounts_hash( funk, slot_bank, valloc, tpool, accounts_hash );
   }
 
   return 0;

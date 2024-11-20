@@ -89,6 +89,7 @@ fd_snapshot_service_hash( fd_hash_t       * accounts_hash,
                           fd_slot_bank_t  * slot_bank,
                           fd_epoch_bank_t * epoch_bank,
                           fd_funk_t       * funk,
+                          fd_tpool_t      * tpool,
                           fd_valloc_t       valloc );
 void
 fd_accounts_check_lthash( fd_funk_t     *  funk,

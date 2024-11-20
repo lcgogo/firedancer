@@ -109,6 +109,7 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
                                       &snapshot_ctx->slot_bank,
                                       &snapshot_ctx->epoch_bank, 
                                       snapshot_ctx->acc_mgr->funk,
+                                      snapshot_ctx->tpool,
                                       snapshot_ctx->valloc );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Unable to calculate snapshot hash" ));
@@ -1025,7 +1026,10 @@ fd_snapshot_create_new_snapshot_offline( fd_snapshot_ctx_t * snapshot_ctx ) {
 
   /* Now that all of the files are open, create a snapshot. */
 
-  FD_TEST( 0 == fd_snapshot_create_new_snapshot( snapshot_ctx ) );
+  if( FD_UNLIKELY( fd_snapshot_create_new_snapshot( snapshot_ctx ) ) ) {
+    FD_LOG_ERR(( "Failed to create the snapshot" ));
+  }
+
   return 0;
 
 }

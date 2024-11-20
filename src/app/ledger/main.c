@@ -95,6 +95,7 @@ struct fd_ledger_args {
   char const *          one_off_features[32];    /* List of one off feature pubkeys to enable for execution agnostic of cluster version */
   uint                  one_off_features_cnt;    /* Number of one off features */
   ulong                 snapshot_freq;           /* How often a snapshot should be produced */
+  ulong                 incremental_freq;        /* How often an incremental snapshot should be produced */
   char const *          snapshot_dir;            /* Directory to create a snapshot in */
   ulong                 snapshot_tcnt;           /* Number of threads to use for snapshot creation */
 
@@ -127,6 +128,8 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
 
   fd_snapshot_ctx_t * snapshot_ctx = (fd_snapshot_ctx_t *)t0;
   fd_ledger_args_t * ledger_args = (fd_ledger_args_t *)t1;
+
+  snapshot_ctx->tpool = tpool;
 
   FD_LOG_WARNING(("Starting snapshot creation at slot=%lu", snapshot_ctx->slot));
 
@@ -177,11 +180,15 @@ init_tpool( fd_ledger_args_t * ledger_args ) {
     return 0;
   }
 
+  else if( snapshot_tcnt==1UL ) {
+    FD_LOG_ERR(( "This is an invalid value for the number of threads to use for snapshot creation" ));
+  }
+
   fd_tpool_t * snapshot_tpool = fd_tpool_init( ledger_args->tpool_mem_two, snapshot_tcnt );
   ulong        scratch_sz     = fd_scratch_smem_footprint( 256UL<<23UL );
   tpool_scr_mem               = fd_valloc_malloc( ledger_args->slot_ctx->valloc, FD_SCRATCH_SMEM_ALIGN, scratch_sz );
   for( ulong i=1UL; i<snapshot_tcnt; ++i ) {
-    if( FD_UNLIKELY( !fd_tpool_worker_push( snapshot_tpool, fd_tile_cnt() - 1, tpool_scr_mem, scratch_sz ) ) ) {
+    if( FD_UNLIKELY( !fd_tpool_worker_push( snapshot_tpool, fd_tile_cnt() - i, tpool_scr_mem, scratch_sz ) ) ) {
       FD_LOG_ERR(( "failed to launch worker" ));
     }
   }
@@ -315,6 +322,8 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
                      (ulong)&snapshot_ctx, (ulong)ledger_args, 0UL, NULL, 
                      0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL );
 
+    } else if( ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL && !is_snapshotting ) {
+      /* TODO: unimplemented*/
     }
   
     ulong blk_txn_cnt = 0;
@@ -1477,6 +1486,7 @@ initial_setup( int argc, char ** argv, fd_ledger_args_t * args ) {
   char const * one_off_features        = fd_env_strip_cmdline_cstr ( &argc, &argv, "--one-off-features",        NULL, NULL      );
   char const * lthash                  = fd_env_strip_cmdline_cstr ( &argc, &argv, "--lthash",                  NULL, "false"   );
   ulong        snapshot_freq           = fd_env_strip_cmdline_ulong( &argc, &argv, "--snapshot-freq",           NULL, ULONG_MAX );
+  ulong        incremental_freq        = fd_env_strip_cmdline_ulong( &argc, &argv, "--incremental-freq",        NULL, ULONG_MAX );
   char const * snapshot_dir            = fd_env_strip_cmdline_cstr ( &argc, &argv, "--snapshot-dir",            NULL, NULL      );
   ulong        snapshot_tcnt           = fd_env_strip_cmdline_ulong( &argc, &argv, "--snapshot-tcnt",           NULL, 2UL       );
 
@@ -1576,6 +1586,7 @@ initial_setup( int argc, char ** argv, fd_ledger_args_t * args ) {
   args->checkpt_status_cache    = checkpt_status_cache;
   args->one_off_features_cnt    = 0UL;
   args->snapshot_freq           = snapshot_freq;
+  args->incremental_freq        = incremental_freq;
   args->snapshot_dir            = snapshot_dir;
   args->snapshot_tcnt           = snapshot_tcnt;
   parse_one_off_features( args, one_off_features );

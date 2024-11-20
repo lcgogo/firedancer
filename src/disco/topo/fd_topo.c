@@ -97,8 +97,6 @@ fd_topo_create_workspace( fd_topo_t *      topo,
   void * wkspmem = fd_wksp_new( shmem, name, 0U, wksp->part_max, wksp->total_footprint ); /* logs details */
   if( FD_UNLIKELY( !wkspmem ) ) FD_LOG_ERR(( "fd_wksp_new failed" ));
 
-  FD_LOG_WARNING(("WKSP NEW %s", name));
-
   fd_wksp_t * join = fd_wksp_join( wkspmem );
   if( FD_UNLIKELY( !join ) ) FD_LOG_ERR(( "fd_wksp_join failed" ));
 
@@ -204,7 +202,13 @@ fd_topo_tile_extra_huge_pages( fd_topo_tile_t const * tile ) {
        extra threads which also require stack space.  These huge
        pages need to be reserved as well. */
     extra_pages += tile->replay.tpool_thread_count*((FD_TILE_PRIVATE_STACK_SZ/FD_SHMEM_HUGE_PAGE_SZ)+2UL);
-  }
+  } 
+  // else if( FD_UNLIKELY ( !strcmp( tile->name, "snaps" ) ) ) {
+    // /* Snapshot tile spawns a bunch of extra threads which also require
+      //  stack space.  These huge pages need to be reserved as well. */
+    // //extra_pages += tile->snaps.tpool_thread_count*((FD_TILE_PRIVATE_STACK_SZ/FD_SHMEM_HUGE_PAGE_SZ)+2UL);
+  // }
+
 
   return extra_pages;
 }

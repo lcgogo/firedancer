@@ -14,6 +14,8 @@
 
 #define SCRATCH_MAX    (1024UL /*MiB*/ << 21)
 #define SCRATCH_DEPTH  (128UL) /* 128 scratch frames */
+#define TPOOL_WORKER_MEM_SZ (1UL<<30UL) /* 256MB */
+
 
 struct fd_snapshot_tile_ctx {
   ulong           interval;
@@ -21,13 +23,42 @@ struct fd_snapshot_tile_ctx {
   fd_funk_t     * funk;
   fd_txncache_t * status_cache;
   fd_wksp_t     * status_cache_wksp;
-  ulong         * smr;
   ulong         * is_constipated;
 
   int             tmp_fd;
   int             snapshot_fd;
+
+  uchar           tpool_mem[FD_TPOOL_FOOTPRINT( FD_TILE_MAX )] __attribute__( ( aligned( FD_TPOOL_ALIGN ) ) );
+  fd_tpool_t *    tpool;
 };
 typedef struct fd_snapshot_tile_ctx fd_snapshot_tile_ctx_t;
+
+void FD_FN_UNUSED
+tpool_snap_boot( fd_topo_t * topo, ulong total_thread_count ) {
+  ushort tile_to_cpu[ FD_TILE_MAX ] = { 0 };
+  ulong thread_count = 0;
+  ulong main_thread_seen = 0;
+
+  for( ulong i=0UL; i<topo->tile_cnt; i++ ) {
+    if( strcmp( topo->tiles[i].name, "thread" ) == 0 ) {
+      tile_to_cpu[ 1+thread_count ] = (ushort)topo->tiles[i].cpu_idx;
+      thread_count++;
+    }
+    if( strcmp( topo->tiles[i].name, "snaps" ) == 0 ) {
+      tile_to_cpu[ 0 ] = (ushort)topo->tiles[i].cpu_idx;
+      main_thread_seen = 1;
+    }
+  }
+
+  if( main_thread_seen ) {
+    thread_count++;
+  }
+
+  if( thread_count != total_thread_count )
+    FD_LOG_WARNING(( "thread count mismatch thread_count=%lu total_thread_count=%lu main_thread_seen=%lu", thread_count, total_thread_count, main_thread_seen ));
+
+  fd_tile_private_map_boot( tile_to_cpu, thread_count );
+}
 
 FD_FN_CONST static inline ulong
 scratch_align( void ) {
@@ -38,6 +69,7 @@ FD_FN_PURE static inline ulong
 scratch_footprint( fd_topo_tile_t const * tile FD_PARAM_UNUSED ) {
   ulong l = FD_LAYOUT_INIT;
   l = FD_LAYOUT_APPEND( l, alignof(fd_snapshot_tile_ctx_t), sizeof(fd_snapshot_tile_ctx_t) );
+  //l = FD_LAYOUT_APPEND( l, FD_SCRATCH_ALIGN_DEFAULT, tile->snaps.tpool_thread_count * TPOOL_WORKER_MEM_SZ );
   l = FD_LAYOUT_APPEND( l, fd_scratch_smem_align(), fd_scratch_smem_footprint( SCRATCH_MAX   ) );
   l = FD_LAYOUT_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   return FD_LAYOUT_FINI( l, scratch_align() );
@@ -84,8 +116,6 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
 
   void * scratch = fd_topo_obj_laddr( topo, tile->tile_obj_id );
 
-  FD_LOG_WARNING(("DONE HERE 2"));
-
   /**********************************************************************/
   /* scratch (bump)-allocate memory owned by the replay tile            */
   /**********************************************************************/
@@ -95,6 +125,7 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   FD_SCRATCH_ALLOC_INIT( l, scratch );
   fd_snapshot_tile_ctx_t * ctx = FD_SCRATCH_ALLOC_APPEND( l, alignof(fd_snapshot_tile_ctx_t), sizeof(fd_snapshot_tile_ctx_t) );
   memset( ctx, 0, sizeof(fd_snapshot_tile_ctx_t) );
+  //void * tpool_worker_mem    = FD_SCRATCH_ALLOC_APPEND( l, FD_SCRATCH_ALIGN_DEFAULT, tile->snaps.tpool_thread_count * TPOOL_WORKER_MEM_SZ );
   void * scratch_smem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_smem_align(), fd_scratch_smem_footprint( SCRATCH_MAX    ) );
   void * scratch_fmem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   ulong  scratch_alloc_mem   = FD_SCRATCH_ALLOC_FINI  ( l, scratch_align() );
@@ -103,6 +134,30 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   ctx->out_dir     = tile->snaps.out_dir;
   ctx->tmp_fd      = tile->snaps.tmp_fd;
   ctx->snapshot_fd = tile->snaps.snapshot_fd;
+
+  /**********************************************************************/
+  /* tpool                                                              */
+  /**********************************************************************/
+
+  // FD_LOG_WARNING(("NUM THREADS: %lu", tile->snaps.tpool_thread_count));
+
+  // if( FD_LIKELY( tile->snaps.tpool_thread_count > 1 ) ) {
+  //   tpool_snap_boot( topo, tile->snaps.tpool_thread_count );
+  // }
+  // ctx->tpool = fd_tpool_init( ctx->tpool_mem, tile->snaps.tpool_thread_count );
+
+  // if( FD_LIKELY( tile->snaps.tpool_thread_count > 1 ) ) {
+  //   /* start the tpool workers */
+  //   for( ulong i = 1UL; i<tile->snaps.tpool_thread_count; i++ ) {
+  //     if( fd_tpool_worker_push( ctx->tpool, i, (uchar *)tpool_worker_mem + TPOOL_WORKER_MEM_SZ*(i - 1U), TPOOL_WORKER_MEM_SZ ) == NULL ) {
+  //       FD_LOG_ERR(( "failed to launch worker" ));
+  //     }
+  //   }
+  // }
+
+  // if( ctx->tpool == NULL ) {
+  //   FD_LOG_ERR(("failed to create thread pool"));
+  // }
 
   /**********************************************************************/
   /* funk                                                               */
@@ -138,18 +193,6 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
           scratch_alloc_mem,
           (ulong)scratch + scratch_footprint( tile ) ) );
   }
-
-  /**********************************************************************/
-  /*  root_slot fseq                                                    */
-  /**********************************************************************/
-
-  ulong root_slot_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "root_slot" );
-  FD_TEST( root_slot_obj_id!=ULONG_MAX );
-  ctx->smr = fd_fseq_join( fd_topo_obj_laddr( topo, root_slot_obj_id ) );
-  if( FD_UNLIKELY( !ctx->smr ) ) {
-    FD_LOG_ERR(( "replay tile has no root_slot fseq" ));
-  }
-  FD_TEST( ULONG_MAX==fd_fseq_query( ctx->smr ) );
 
   /**********************************************************************/
   /*  constipated fseq                                                  */
@@ -190,6 +233,7 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
       .status_cache   = ctx->status_cache,
       .tmp_fd         = ctx->tmp_fd,
       .snapshot_fd    = ctx->snapshot_fd,
+      .tpool          = NULL
     };
 
     /* If this isn't the first snapshot that this tile is creating, the

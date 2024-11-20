@@ -344,7 +344,6 @@ fd_exec_slot_ctx_recover_( fd_exec_slot_ctx_t *   slot_ctx,
   do {
     ulong epoch = fd_slot_to_epoch( &epoch_bank->epoch_schedule, slot_bank->slot, NULL );
 
-
     /* Find EpochStakes object matching epoch */
 
     fd_epoch_epoch_stakes_pair_t * epochs  = oldbank->epoch_stakes;

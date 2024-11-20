@@ -60,6 +60,8 @@ struct fd_snapshot_ctx {
   fd_epoch_bank_t   epoch_bank;
   fd_acc_mgr_t *    acc_mgr;
   fd_txncache_t *   status_cache;
+
+  fd_tpool_t * tpool;
 };
 typedef struct fd_snapshot_ctx fd_snapshot_ctx_t;
 

@@ -4389,7 +4389,8 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   slot_ctx->funk_txn = fd_funk_txn_prepare( slot_ctx->acc_mgr->funk, slot_ctx->funk_txn, &migration_xid, 0UL );
   fd_funk_end_write( slot_ctx->acc_mgr->funk );
 
-  /* Attempt serialization of program account
+  /* Attempt serialization of program account. If the program is stateless, we want to create the account. Otherwise,
+     we want a writable handle to modify the existing account.
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L246-L249 */
   FD_BORROWED_ACCOUNT_DECL( new_target_program_account );
   err = fd_acc_mgr_modify( slot_ctx->acc_mgr, slot_ctx->funk_txn, builtin_program_id, stateless, SIZE_OF_PROGRAM, new_target_program_account );

@@ -361,7 +361,7 @@ write_program_data( fd_exec_instr_ctx_t *   instr_ctx,
 /* get_state() */
 /* https://github.com/anza-xyz/agave/blob/574bae8fefc0ed256b55340b9d87b7689bcdf222/sdk/src/transaction_context.rs#L968-L972 */
 int
-fd_bpf_loader_v3_program_get_state( fd_exec_instr_ctx_t *               instr_ctx,
+fd_bpf_loader_v3_program_get_state( fd_exec_instr_ctx_t *                instr_ctx,
                                      fd_borrowed_account_t *             borrowed_acc,
                                      fd_bpf_upgradeable_loader_state_t * state ) {
     /* Check to see if the buffer account is already initialized */

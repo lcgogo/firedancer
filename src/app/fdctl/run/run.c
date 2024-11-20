@@ -544,17 +544,8 @@ fdctl_obj_new( fd_topo_t const *     topo,
   } else if( FD_UNLIKELY( !strcmp( obj->name, "blockstore" ) ) ) {
     FD_TEST( fd_blockstore_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("shred_max"), VAL("block_max"), VAL("txn_max") ) );
   } else if( FD_UNLIKELY( !strcmp( obj->name, "funk" ) ) ) {
-    /* TODO:FIXME: turn this into a file-mapped funk. */
+    /* TODO:FIXME: Change into joining the file backed funk. */
     FD_TEST( fd_funk_new( laddr, VAL("wksp_tag"), VAL("seed"), VAL("txn_max"), VAL("rec_max") ) );
-    // fd_funk_t * funk =  fd_funk_open_file( VAL_STR("funk_file"),
-    //                             VAL("wksp_tag"),
-    //                             VAL("seed"),
-    //                             VAL("txn_max"),
-    //                             VAL("rec_max"),
-    //                             VAL("sz_gb") * (1UL<<30),
-    //                             FD_FUNK_OVERWRITE,
-    //                             NULL );
-
   } else if( FD_UNLIKELY( !strcmp( obj->name, "txncache" ) ) ) {
     FD_TEST( fd_txncache_new( laddr, VAL("max_rooted_slots"), VAL("max_live_slots"), VAL("max_txn_per_slot"), FD_TXNCACHE_DEFAULT_MAX_CONSTIPATED_SLOTS ) );
   } else {

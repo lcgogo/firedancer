@@ -1355,7 +1355,7 @@ tpool_boot( fd_topo_t * topo, ulong total_thread_count ) {
   }
 
   if( thread_count != total_thread_count )
-    FD_LOG_ERR(( "thread count mismatch thread_count=%lu total_thread_count=%lu main_thread_seen=%lu", thread_count, total_thread_count, main_thread_seen ));
+    FD_LOG_WARNING(( "thread count mismatch thread_count=%lu total_thread_count=%lu main_thread_seen=%lu", thread_count, total_thread_count, main_thread_seen ));
 
   fd_tile_private_map_boot( tile_to_cpu, thread_count );
 }

@@ -353,7 +353,7 @@ typedef struct {
       char  out_dir[ PATH_MAX ];
       int   tmp_fd;
       int   snapshot_fd;
-      // ulong tpool_thread_count;
+      ulong tpool_thread_count;
     } snaps;
 
   };

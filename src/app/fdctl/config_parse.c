@@ -389,7 +389,7 @@ fdctl_pod_to_cfg( config_t * config,
 
   CFG_POP      ( ulong,  tiles.snaps.interval                             );
   CFG_POP      ( cstr,   tiles.snaps.out_dir                              );
-  // CFG_POP      ( ulong,  tiles.snaps.tpool_thread_count                   );
+  CFG_POP      ( ulong,  tiles.snaps.tpool_thread_count                   );
 
 
 # undef CFG_POP

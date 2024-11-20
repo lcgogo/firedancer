@@ -98,7 +98,7 @@ fd_topo_initialize( config_t * config ) {
   ulong bank_tile_cnt   = config->layout.bank_tile_count;
 
   ulong replay_tpool_thread_count = config->tiles.replay.tpool_thread_count;
-  //ulong snaps_tpool_thread_count  = config->tiles.snaps.tpool_thread_count;
+  ulong snaps_tpool_thread_count  = config->tiles.snaps.tpool_thread_count;
 
   int enable_rpc = ( config->rpc.port != 0 );
 
@@ -279,7 +279,7 @@ fd_topo_initialize( config_t * config ) {
 
   /**/                             fd_topob_tile( topo, "snaps",   "snaps",   "metric_in",  tile_to_cpu[ topo->tile_cnt ], 0 );
   /* These thread tiles must be defined immediately after the snapshot tile. */
-  // FOR(snaps_tpool_thread_count)   fd_topob_tile( topo, "thread",  "thread",  "metric_in",  tile_to_cpu[ topo->tile_cnt ], 0 );
+  FOR(snaps_tpool_thread_count)   fd_topob_tile( topo, "thread",  "thread",  "metric_in",  tile_to_cpu[ topo->tile_cnt ], 0 );
   /**/                             fd_topob_tile( topo, "replay",  "replay",  "metric_in",  tile_to_cpu[ topo->tile_cnt ], 0 );
   /* These thread tiles must be defined immediately after the replay tile.  We subtract one because the replay tile acts as a thread in the tpool as well. */
   FOR(replay_tpool_thread_count-1) fd_topob_tile( topo, "thread", "thread", "metric_in", tile_to_cpu[ topo->tile_cnt ], 0 );
@@ -695,7 +695,7 @@ fd_topo_initialize( config_t * config ) {
     } else if( FD_UNLIKELY( !strcmp( tile->name, "snaps" ) ) ) {
       tile->snaps.interval = config->tiles.snaps.interval;
       strncpy( tile->snaps.out_dir, config->tiles.snaps.out_dir, sizeof(tile->snaps.out_dir) );
-      // tile->snaps.tpool_thread_count = config->tiles.snaps.tpool_thread_count;
+      tile->snaps.tpool_thread_count = config->tiles.snaps.tpool_thread_count;
     } else {
       FD_LOG_ERR(( "unknown tile name %lu `%s`", i, tile->name ));
     }

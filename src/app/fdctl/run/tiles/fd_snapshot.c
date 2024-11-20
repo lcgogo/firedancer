@@ -69,7 +69,7 @@ FD_FN_PURE static inline ulong
 scratch_footprint( fd_topo_tile_t const * tile FD_PARAM_UNUSED ) {
   ulong l = FD_LAYOUT_INIT;
   l = FD_LAYOUT_APPEND( l, alignof(fd_snapshot_tile_ctx_t), sizeof(fd_snapshot_tile_ctx_t) );
-  //l = FD_LAYOUT_APPEND( l, FD_SCRATCH_ALIGN_DEFAULT, tile->snaps.tpool_thread_count * TPOOL_WORKER_MEM_SZ );
+  l = FD_LAYOUT_APPEND( l, FD_SCRATCH_ALIGN_DEFAULT, tile->snaps.tpool_thread_count * TPOOL_WORKER_MEM_SZ );
   l = FD_LAYOUT_APPEND( l, fd_scratch_smem_align(), fd_scratch_smem_footprint( SCRATCH_MAX   ) );
   l = FD_LAYOUT_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   return FD_LAYOUT_FINI( l, scratch_align() );
@@ -125,7 +125,7 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   FD_SCRATCH_ALLOC_INIT( l, scratch );
   fd_snapshot_tile_ctx_t * ctx = FD_SCRATCH_ALLOC_APPEND( l, alignof(fd_snapshot_tile_ctx_t), sizeof(fd_snapshot_tile_ctx_t) );
   memset( ctx, 0, sizeof(fd_snapshot_tile_ctx_t) );
-  //void * tpool_worker_mem    = FD_SCRATCH_ALLOC_APPEND( l, FD_SCRATCH_ALIGN_DEFAULT, tile->snaps.tpool_thread_count * TPOOL_WORKER_MEM_SZ );
+  void * tpool_worker_mem    = FD_SCRATCH_ALLOC_APPEND( l, FD_SCRATCH_ALIGN_DEFAULT, tile->snaps.tpool_thread_count * TPOOL_WORKER_MEM_SZ );
   void * scratch_smem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_smem_align(), fd_scratch_smem_footprint( SCRATCH_MAX    ) );
   void * scratch_fmem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   ulong  scratch_alloc_mem   = FD_SCRATCH_ALLOC_FINI  ( l, scratch_align() );
@@ -139,25 +139,25 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   /* tpool                                                              */
   /**********************************************************************/
 
-  // FD_LOG_WARNING(("NUM THREADS: %lu", tile->snaps.tpool_thread_count));
+  FD_LOG_WARNING(("NUM THREADS: %lu", tile->snaps.tpool_thread_count));
 
-  // if( FD_LIKELY( tile->snaps.tpool_thread_count > 1 ) ) {
-  //   tpool_snap_boot( topo, tile->snaps.tpool_thread_count );
-  // }
-  // ctx->tpool = fd_tpool_init( ctx->tpool_mem, tile->snaps.tpool_thread_count );
+  if( FD_LIKELY( tile->snaps.tpool_thread_count > 1 ) ) {
+    tpool_snap_boot( topo, tile->snaps.tpool_thread_count );
+  }
+  ctx->tpool = fd_tpool_init( ctx->tpool_mem, tile->snaps.tpool_thread_count );
 
-  // if( FD_LIKELY( tile->snaps.tpool_thread_count > 1 ) ) {
-  //   /* start the tpool workers */
-  //   for( ulong i = 1UL; i<tile->snaps.tpool_thread_count; i++ ) {
-  //     if( fd_tpool_worker_push( ctx->tpool, i, (uchar *)tpool_worker_mem + TPOOL_WORKER_MEM_SZ*(i - 1U), TPOOL_WORKER_MEM_SZ ) == NULL ) {
-  //       FD_LOG_ERR(( "failed to launch worker" ));
-  //     }
-  //   }
-  // }
+  if( FD_LIKELY( tile->snaps.tpool_thread_count > 1 ) ) {
+    /* start the tpool workers */
+    for( ulong i = 1UL; i<tile->snaps.tpool_thread_count; i++ ) {
+      if( fd_tpool_worker_push( ctx->tpool, i, (uchar *)tpool_worker_mem + TPOOL_WORKER_MEM_SZ*(i - 1U), TPOOL_WORKER_MEM_SZ ) == NULL ) {
+        FD_LOG_ERR(( "failed to launch worker" ));
+      }
+    }
+  }
 
-  // if( ctx->tpool == NULL ) {
-  //   FD_LOG_ERR(("failed to create thread pool"));
-  // }
+  if( ctx->tpool == NULL ) {
+    FD_LOG_ERR(("failed to create thread pool"));
+  }
 
   /**********************************************************************/
   /* funk                                                               */
@@ -206,7 +206,6 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   }
   fd_fseq_update( ctx->is_constipated, 0UL );
   FD_TEST( 0UL==fd_fseq_query( ctx->is_constipated ) );
-  FD_LOG_WARNING(("SET TO ZERO"));
 
 }
 
@@ -224,6 +223,8 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
 
     uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
 
+    FD_TEST( ctx->tpool );
+
     fd_snapshot_ctx_t snapshot_ctx = {
       .slot           = is_constipated,
       .out_dir        = ctx->out_dir,
@@ -233,7 +234,7 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
       .status_cache   = ctx->status_cache,
       .tmp_fd         = ctx->tmp_fd,
       .snapshot_fd    = ctx->snapshot_fd,
-      .tpool          = NULL
+      .tpool          = ctx->tpool
     };
 
     /* If this isn't the first snapshot that this tile is creating, the

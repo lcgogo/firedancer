@@ -22128,7 +22128,7 @@ ulong fd_bpf_upgradeable_loader_state_size( fd_bpf_upgradeable_loader_state_t co
     break;
   }
   case 3: {
-    size += fd_bpf_upgradeable_loader_state_progr am_data_size( &self->inner.program_data );
+    size += fd_bpf_upgradeable_loader_state_program_data_size( &self->inner.program_data );
     break;
   }
   }

@@ -67,15 +67,16 @@ read_bpf_upgradeable_loader_state_for_program( fd_exec_txn_ctx_t * txn_ctx,
 
 /* Public APIs */
 
-/* This function is called from `fd_runtime.c` and used to deploy a program specifically for the core native program
-   BPF migration. Since this call is done at the epoch boundary every time a new BPF core migration feature is activated,
-   we need to mock up a transaction and instruction context for execution. This will invoke all the ELF and VM validation
-   checks as well.
+/* This function is called from `fd_runtime.c` and only performs the ELF and VM validation checks necessary
+   to deploy a program, specifically for the core native program BPF migration. Since this call is done at 
+   the epoch boundary every time a new BPF core migration feature is activated, we need to mock up a transaction 
+   and instruction context for execution. We do not do any funk operations here - instead, the BPF cache entry
+   will be created at the end of the block. Because of this, our logic is slightly different than Agave's.
+   See the documentation for our `deploy_program` for more information.
 
    https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L155-L233 */
 int
 fd_directly_invoke_loader_v3_deploy( fd_exec_slot_ctx_t * slot_ctx,
-                                     const fd_pubkey_t *  program_id,
                                      const uchar *        programdata,
                                      ulong                programdata_size );
 

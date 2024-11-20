@@ -236,7 +236,7 @@ calculate_heap_cost( ulong heap_size, ulong heap_cost, int * err ) {
    'account_size' argument because we do not update the funk record here. */
 int
 deploy_program( fd_exec_instr_ctx_t * instr_ctx,
-                uchar * const         programdata,
+                const uchar *         programdata,
                 ulong                 programdata_size ) {
   int deploy_mode    = 1;
   int direct_mapping = FD_FEATURE_ACTIVE( instr_ctx->slot_ctx, bpf_account_data_direct_mapping );
@@ -956,7 +956,7 @@ process_loader_upgradeable_instruction( fd_exec_instr_ctx_t * instr_ctx ) {
 
       const uchar * buffer_data = buffer->const_data + buffer_data_offset;
 
-      err = deploy_program( instr_ctx, (uchar*)buffer_data, buffer_data_len );
+      err = deploy_program( instr_ctx, buffer_data, buffer_data_len );
       if( FD_UNLIKELY( err ) ) {
         FD_LOG_WARNING(( "Failed to deploy program" )); // custom log
         return err;
@@ -1210,7 +1210,7 @@ process_loader_upgradeable_instruction( fd_exec_instr_ctx_t * instr_ctx ) {
       }
 
       const uchar * buffer_data = buffer->const_data + buffer_data_offset;
-      err = deploy_program( instr_ctx, (uchar*)buffer_data, buffer_data_len );
+      err = deploy_program( instr_ctx, buffer_data, buffer_data_len );
       if( FD_UNLIKELY( err ) ) {
         FD_LOG_WARNING(( "Failed to deploy program" ));
         return err;
@@ -1943,7 +1943,6 @@ fd_bpf_loader_program_execute( fd_exec_instr_ctx_t * ctx ) {
 
 int
 fd_directly_invoke_loader_v3_deploy( fd_exec_slot_ctx_t * slot_ctx,
-                                     const fd_pubkey_t *  program_id,
                                      const uchar *        programdata,
                                      ulong                programdata_size ) {
   /* Set up a dummy instr and txn context */

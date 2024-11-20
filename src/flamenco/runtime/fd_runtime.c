@@ -4178,7 +4178,7 @@ fd_new_target_program_account( fd_exec_slot_ctx_t *    slot_ctx,
   };
 
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L89-L90 */
-  fd_rent_t * rent = fd_sysvar_cache_rent( slot_ctx->sysvar_cache );
+  const fd_rent_t * rent = fd_sysvar_cache_rent( slot_ctx->sysvar_cache );
   if( FD_UNLIKELY( rent==NULL ) ) {
     return -1;
   }
@@ -4211,7 +4211,7 @@ fd_new_target_program_account( fd_exec_slot_ctx_t *    slot_ctx,
    https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L97-L153 */
 static int
 fd_new_target_program_data_account( fd_exec_slot_ctx_t *    slot_ctx,
-                                    const fd_pubkey_t *     config_upgrade_authority_address,
+                                    fd_pubkey_t *           config_upgrade_authority_address,
                                     fd_borrowed_account_t * buffer_acc_rec,
                                     fd_borrowed_account_t * new_target_program_data_account ) {
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L113-L116 */
@@ -4239,7 +4239,7 @@ fd_new_target_program_data_account( fd_exec_slot_ctx_t *    slot_ctx,
   }
 
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L127-L132 */
-  fd_rent_t * rent = fd_sysvar_cache_rent( slot_ctx->sysvar_cache );
+  const fd_rent_t * rent = fd_sysvar_cache_rent( slot_ctx->sysvar_cache );
   if( FD_UNLIKELY( rent==NULL ) ) {
     return -1;
   }
@@ -4291,9 +4291,9 @@ fd_new_target_program_data_account( fd_exec_slot_ctx_t *    slot_ctx,
   https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L235-L318 */
 static void
 fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
+                                fd_pubkey_t *        upgrade_authority_address,
                                 const fd_pubkey_t *  builtin_program_id,
                                 const fd_pubkey_t *  source_buffer_address,
-                                const fd_pubkey_t *  upgrade_authority_address,
                                 uchar                stateless ) {
   int err;
 
@@ -4340,10 +4340,10 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   seeds[ 0UL ]    = (uchar *)builtin_program_id;
   ulong seed_sz   = sizeof(fd_pubkey_t);
   uchar bump_seed = 0;
-  err = fd_pubkey_derive_pda( _mock_instr_ctx, &fd_solana_bpf_loader_upgradeable_program_id, 1UL, seeds, seed_sz, target_program_data_address, &bump_seed );
+  err = fd_pubkey_derive_pda( _mock_instr_ctx, &fd_solana_bpf_loader_upgradeable_program_id, 1UL, seeds, &seed_sz, &bump_seed, target_program_data_address );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_ERR(( "Unable to find a viable program address bump seed" )); // Solana panics, error code is undefined
-    return err;
+    return;
   }
   FD_BORROWED_ACCOUNT_DECL( program_data_account );
   if( FD_UNLIKELY( fd_acc_mgr_view( slot_ctx->acc_mgr, slot_ctx->funk_txn, target_program_data_address, program_data_account )==FD_ACC_MGR_SUCCESS ) ) {
@@ -4375,6 +4375,10 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   /* The buffer account should have the correct state. We already check the buffer account state in `fd_new_target_program_data_account`,
       so we can skip the checks here.
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/source_buffer.rs#L37-L47 */
+
+  /* This check is done a bit prematurely because we calculate the previous account state's lamports.
+     https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L277-L280 */
+  ulong lamports_to_burn = target_program_account->const_meta->info.lamports + source_buffer_account->const_meta->info.lamports;
 
   /* Start a funk write txn */
   fd_funk_txn_t * parent_txn = slot_ctx->funk_txn;
@@ -4418,19 +4422,26 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
     goto fail;
   }
 
-  /* TODO: lamport, data, and capitalization checks */
-
   /* Deploy the new target Core BPF program. 
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L268-L271 */
-  int err = fd_directly_invoke_loader_v3_deploy( slot_ctx, 
-                                                 builtin_program_id, 
-                                                 new_target_program_data_account->const_data,
-                                                 new_target_program_data_account->const_meta->dlen );
+  err = fd_directly_invoke_loader_v3_deploy( slot_ctx, 
+                                             new_target_program_data_account->const_data,
+                                             new_target_program_data_account->const_meta->dlen );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Failed to deploy program %s", FD_BASE58_ENC_32_ALLOCA( builtin_program_id ) ));
     goto fail;
   }
-  
+
+  /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L281-L284 */
+  ulong lamports_to_fund = new_target_program_account->const_meta->info.lamports + new_target_program_data_account->const_meta->info.lamports;
+
+  /* Update capitalization.
+     https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L286-L297 */
+  if( lamports_to_burn>lamports_to_fund ) {
+    slot_ctx->slot_bank.capitalization -= lamports_to_burn - lamports_to_fund;
+  } else {
+    slot_ctx->slot_bank.capitalization += lamports_to_fund - lamports_to_burn;
+  }
 
   /* Reclaim the source buffer account 
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L305 */
@@ -4438,10 +4449,6 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   source_buffer_account->meta->dlen = 0;
   fd_memset( source_buffer_account->meta->info.owner, 0, sizeof(fd_pubkey_t) );
   
-  
-  // fd_acc_mgr_modify(migration_txn)
-  // fd_funk_txn_cancel( slot_ctx->acc_mgr->funk, migration_txn );
-
   /* Publish the in-preparation transaction into the parent. We should not have to create
      a BPF cache entry here because the program is technically "delayed visibility", so the program
      should not be invokable until the next slot. The cache entry will be created at the end of the 
@@ -4472,7 +4479,7 @@ fd_apply_builtin_program_feature_transitions( fd_exec_slot_ctx_t * slot_ctx ) {
        is the Feature program.
        https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank.rs#L6776-L6793 */
     if( FD_FEATURE_ACTIVE( slot_ctx, migrate_feature_gate_program_to_core_bpf ) ) {
-      fd_migrate_builtin_to_core_bpf( slot_ctx, &fd_solana_feature_program_id, &fd_solana_feature_program_buffer_address, NULL, 1 );
+      fd_migrate_builtin_to_core_bpf( slot_ctx, NULL, &fd_solana_feature_program_id, &fd_solana_feature_program_buffer_address, 1 );
     }
 
 

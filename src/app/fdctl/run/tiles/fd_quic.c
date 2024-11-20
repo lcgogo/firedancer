@@ -4,9 +4,6 @@
 
 #include "../../../../disco/metrics/fd_metrics.h"
 #include "../../../../waltz/quic/fd_quic.h"
-#include "../../../../waltz/xdp/fd_xsk_aio.h"
-#include "../../../../waltz/xdp/fd_xsk.h"
-#include "../../../../waltz/ip/fd_netlink.h"
 #include "../../../../disco/quic/fd_tpu.h"
 
 #include <linux/unistd.h>
@@ -45,8 +42,6 @@ typedef struct {
   fd_sha512_t      sha512[1]; /* used for signing */
 
   uchar buffer[ FD_NET_MTU ];
-
-  ulong conn_seq; /* current quic connection sequence number */
 
   ulong round_robin_cnt;
   ulong round_robin_id;
@@ -199,6 +194,8 @@ metrics_write( fd_quic_ctx_t * ctx ) {
 
   FD_MCNT_ENUM_COPY( QUIC, RECEIVED_FRAMES, ctx->quic->metrics.frame_rx_cnt );
 
+  FD_MCNT_ENUM_COPY( QUIC, ACK_TX, ctx->quic->metrics.ack_tx );
+
   FD_MHIST_COPY( QUIC, SERVICE_DURATION_SECONDS, ctx->quic->metrics.service_duration );
   FD_MHIST_COPY( QUIC, RECEIVE_DURATION_SECONDS, ctx->quic->metrics.receive_duration );
 }
@@ -300,9 +297,7 @@ quic_now( void * ctx ) {
 static void
 quic_conn_new( fd_quic_conn_t * conn,
                void *           _ctx ) {
-  fd_quic_ctx_t * ctx = (fd_quic_ctx_t *)_ctx;
-
-  conn->local_conn_id = ++ctx->conn_seq;
+  (void)conn; (void)_ctx;
 }
 
 /* quic_stream_new is called back by the QUIC engine whenever an open
@@ -320,7 +315,7 @@ quic_stream_new( fd_quic_stream_t * stream,
 
   fd_quic_ctx_t * ctx = (fd_quic_ctx_t *)_ctx;
 
-  ulong conn_id   = stream->conn->local_conn_id;
+  ulong conn_uid  = fd_quic_conn_uid( stream->conn );
   ulong stream_id = stream->stream_id;
 
   /* Acquire reassembly slot */
@@ -328,7 +323,7 @@ quic_stream_new( fd_quic_stream_t * stream,
   uint                  tsorig = (uint)fd_frag_meta_ts_comp( fd_tickcount() );
   fd_tpu_reasm_slot_t * slot   = fd_tpu_reasm_prepare( ctx->reasm, tsorig );
 
-  slot->conn_id   = conn_id;
+  slot->conn_id   = conn_uid;
   slot->stream_id = stream_id;
 
   /* Wire up with QUIC stream */
@@ -363,10 +358,10 @@ quic_stream_receive( fd_quic_stream_t * stream,
 
   /* Check if reassembly slot is still valid */
 
-  ulong conn_id   = stream->conn->local_conn_id;
+  ulong conn_uid  = fd_quic_conn_uid( stream->conn );
   ulong stream_id = stream->stream_id;
 
-  if( FD_UNLIKELY( ( slot->conn_id   != conn_id   ) |
+  if( FD_UNLIKELY( ( slot->conn_id   != conn_uid  ) |
                    ( slot->stream_id != stream_id ) ) ) {
     return;  /* clobbered */
   }
@@ -402,10 +397,10 @@ quic_stream_notify( fd_quic_stream_t * stream,
 
   /* Check if reassembly slot is still valid */
 
-  ulong conn_id   = stream->conn->local_conn_id;
+  ulong conn_uid  = fd_quic_conn_uid( stream->conn );
   ulong stream_id = stream->stream_id;
 
-  if( FD_UNLIKELY( ( slot->conn_id   != conn_id   ) |
+  if( FD_UNLIKELY( ( slot->conn_id   != conn_uid  ) |
                    ( slot->stream_id != stream_id ) ) ) {
     ctx->metrics.txns_overrun++;
     return;  /* clobbered */
@@ -624,8 +619,6 @@ unprivileged_init( fd_topo_t *      topo,
   ctx->reasm = verify_out->reasm;
   if( FD_UNLIKELY( !ctx->reasm ) )
     FD_LOG_ERR(( "invalid tpu_reasm parameters" ));
-
-  ctx->conn_seq    = 0UL;
 
   ctx->quic        = quic;
   ctx->quic_rx_aio = fd_quic_get_aio_net_rx( quic );

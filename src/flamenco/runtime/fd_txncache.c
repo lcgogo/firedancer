@@ -546,7 +546,6 @@ fd_txncache_register_root_slot_private( fd_txncache_t * tc,
 
   if( FD_UNLIKELY( tc->root_slots_cnt>=tc->root_slots_max ) ) {
     if( FD_LIKELY( idx ) ) {
-      FD_LOG_WARNING(("FOUND IDX %lu ROOTING", idx));
       fd_txncache_purge_slot( tc, root_slots[ 0 ] );
       memmove( root_slots, root_slots+1UL, (idx-1UL)*sizeof(ulong) );
       root_slots[ (idx-1UL) ] = slot;
@@ -555,7 +554,6 @@ fd_txncache_register_root_slot_private( fd_txncache_t * tc,
     }
   } else {
     if( FD_UNLIKELY( idx<tc->root_slots_cnt ) ) {
-      FD_LOG_WARNING(("ADDING SOMETHING TO THE ROOT"));
       memmove( root_slots+idx+1UL, root_slots+idx, (tc->root_slots_cnt-idx)*sizeof(ulong) );
     }
     root_slots[ idx ] = slot;

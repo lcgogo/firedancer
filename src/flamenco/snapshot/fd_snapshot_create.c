@@ -913,8 +913,13 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
   }
 
   char directory_buf_zstd[ FD_SNAPSHOT_DIR_MAX ];
-  err = snprintf( directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/snapshot-%lu-%s.tar.zst", 
-                  snapshot_ctx->out_dir, snapshot_ctx->slot, FD_BASE58_ENC_32_ALLOCA(&snapshot_ctx->hash) );
+  if( !snapshot_ctx->is_incremental ) {
+    err = snprintf( directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/snapshot-%lu-%s.tar.zst", 
+                    snapshot_ctx->out_dir, snapshot_ctx->slot, FD_BASE58_ENC_32_ALLOCA(&snapshot_ctx->hash) );
+  } else {
+    err = snprintf( directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/incremental-snapshot-%lu-%lu-%s.tar.zst", 
+                    snapshot_ctx->out_dir, snapshot_ctx->last_snap_slot, snapshot_ctx->slot, FD_BASE58_ENC_32_ALLOCA(&snapshot_ctx->hash) );
+  }
   if( FD_UNLIKELY( err<0 ) ) {
     FD_LOG_WARNING(( "Failed to format directory string" ));
     return -1;

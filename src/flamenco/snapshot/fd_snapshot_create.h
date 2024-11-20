@@ -46,8 +46,12 @@ FD_PROTOTYPES_BEGIN
 struct fd_snapshot_ctx {
   ulong             slot;
   char const *      out_dir;
-  uchar             is_incremental;
   fd_valloc_t       valloc;
+
+  fd_tpool_t * tpool;
+
+  uchar             is_incremental;
+  ulong             last_snap_slot;
 
   /* TODO: Add a comment here */
   int               tmp_fd;
@@ -61,7 +65,6 @@ struct fd_snapshot_ctx {
   fd_acc_mgr_t *    acc_mgr;
   fd_txncache_t *   status_cache;
 
-  fd_tpool_t * tpool;
 };
 typedef struct fd_snapshot_ctx fd_snapshot_ctx_t;
 

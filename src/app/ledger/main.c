@@ -99,7 +99,7 @@ struct fd_ledger_args {
   char const *          snapshot_dir;            /* Directory to create a snapshot in */
   ulong                 snapshot_tcnt;           /* Number of threads to use for snapshot creation */
 
-  /* These values are setup before replay */
+  /* These values are setup and maintained before replay */
   fd_capture_ctx_t *    capture_ctx;             /* capture_ctx is used in runtime_replay for various debugging tasks */
   fd_acc_mgr_t          acc_mgr[ 1UL ];          /* funk wrapper*/
   fd_exec_slot_ctx_t *  slot_ctx;                /* slot_ctx */
@@ -110,6 +110,8 @@ struct fd_ledger_args {
   fd_spad_t *           spads[ 128UL ];          /* scratchpad allocators that are eventually assigned to each txn_ctx */
   ulong                 spad_cnt;                /* number of scratchpads, bounded by number of threads */
   fd_tpool_t *          snapshot_tpool;          /* thread pool for snapshot creation */
+  ulong                 last_snapshot_slot;      /* last snapshot slot */
+  int                   is_snapshotting;         /* determine if a snapshot is being created */
 
   char const *      lthash;
 };
@@ -129,8 +131,6 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
   fd_snapshot_ctx_t * snapshot_ctx = (fd_snapshot_ctx_t *)t0;
   fd_ledger_args_t * ledger_args = (fd_ledger_args_t *)t1;
 
-  snapshot_ctx->tpool = tpool;
-
   FD_LOG_WARNING(("Starting snapshot creation at slot=%lu", snapshot_ctx->slot));
 
   int err = fd_snapshot_create_new_snapshot_offline( snapshot_ctx );
@@ -140,6 +140,7 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
   FD_LOG_NOTICE(("Successfully produced a snapshot at directory=%s", ledger_args->snapshot_dir ));
 
   ledger_args->slot_ctx->epoch_ctx->constipate_root = 0;
+  ledger_args->is_snapshotting                      = 0;
 
 }
 
@@ -256,7 +257,7 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
   uchar trash_hash_buf[32];
   memset( trash_hash_buf, 0xFE, sizeof(trash_hash_buf) );
 
-  int is_snapshotting = 0;
+  ledger_args->is_snapshotting = 0;
 
   for( ulong slot = start_slot; slot <= ledger_args->end_slot; ++slot ) {
     ledger_args->slot_ctx->slot_bank.prev_slot = prev_slot;
@@ -299,11 +300,18 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
     ulong   sz  = blk->data_sz;
     fd_blockstore_end_read( blockstore );
 
-    if( ledger_args->slot_ctx->root_slot%ledger_args->snapshot_freq==0UL && !is_snapshotting ) {
+    /* TODO:FIXME: skipped slots handling */
+
+
+    FD_LOG_WARNING(("last snapshot slot %lu snapping %u freq met %u", ledger_args->last_snapshot_slot, ledger_args->is_snapshotting, ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL ));
+
+    if( ledger_args->slot_ctx->root_slot%ledger_args->snapshot_freq==0UL && !ledger_args->is_snapshotting ) {
 
       uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
 
-      is_snapshotting = 1;
+      ledger_args->is_snapshotting = 1;
+
+      ledger_args->last_snapshot_slot = ledger_args->slot_ctx->root_slot;
 
       fd_snapshot_ctx_t snapshot_ctx = {
         .slot           = ledger_args->slot_ctx->root_slot,
@@ -312,18 +320,35 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
         .valloc         = fd_scratch_virtual(),
         .acc_mgr        = fd_acc_mgr_new( mem, ledger_args->slot_ctx->acc_mgr->funk ),
         .status_cache   = ledger_args->slot_ctx->status_cache,
+        .tpool          = fd_tpool_worker_cnt( ledger_args->snapshot_tpool ) > 2UL ? ledger_args->snapshot_tpool : NULL
       };
-
-      /* TODO: currently the snapshot tpool isn't fully being utilized. Only
-               the thread used to actually create the snapshto is used. Other
-               threads could be used to speed up the hashing. */
 
       fd_tpool_exec( ledger_args->snapshot_tpool, 1UL, fd_create_snapshot_task, NULL, 
                      (ulong)&snapshot_ctx, (ulong)ledger_args, 0UL, NULL, 
                      0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL );
 
-    } else if( ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL && !is_snapshotting ) {
-      /* TODO: unimplemented*/
+    } else if( ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL && !ledger_args->is_snapshotting && ledger_args->last_snapshot_slot ) {
+      
+      FD_LOG_WARNING(("MAKE IT IN INCREMENTAL"));
+
+      uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
+
+      ledger_args->is_snapshotting = 1;
+
+      fd_snapshot_ctx_t snapshot_ctx = {
+        .slot           = ledger_args->slot_ctx->root_slot,
+        .out_dir        = ledger_args->snapshot_dir,
+        .is_incremental = 1,
+        .valloc         = fd_scratch_virtual(),
+        .acc_mgr        = fd_acc_mgr_new( mem, ledger_args->slot_ctx->acc_mgr->funk ),
+        .status_cache   = ledger_args->slot_ctx->status_cache,
+        .last_snap_slot = ledger_args->last_snapshot_slot, /* TODO:FIXME: make it clear that this implies last full snapshot */
+        .tpool          = fd_tpool_worker_cnt( ledger_args->snapshot_tpool ) > 2UL ? ledger_args->snapshot_tpool : NULL
+      };
+
+      fd_tpool_exec( ledger_args->snapshot_tpool, 1UL, fd_create_snapshot_task, NULL, 
+                     (ulong)&snapshot_ctx, (ulong)ledger_args, 0UL, NULL, 
+                     0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL );
     }
   
     ulong blk_txn_cnt = 0;
@@ -533,7 +558,10 @@ fd_ledger_main_setup( fd_ledger_args_t * args ) {
 
   fd_runtime_recover_banks( args->slot_ctx, 0, args->genesis==NULL );
 
-  args->slot_ctx->snapshot_freq = args->snapshot_freq;
+  args->slot_ctx->snapshot_freq      = args->snapshot_freq;
+  args->slot_ctx->incremental_freq   = args->incremental_freq;
+  args->slot_ctx->last_snapshot_slot = 0UL;
+  args->last_snapshot_slot           = 0UL;
 
   /* Finish other runtime setup steps */
   fd_funk_start_write( funk );

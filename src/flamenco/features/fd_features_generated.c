@@ -1247,6 +1247,18 @@ fd_feature_id_t const ids[] = {
     .name       = "migrate_feature_gate_program_to_core_bpf",
     .cleaned_up = {UINT_MAX, UINT_MAX, UINT_MAX} },
 
+  { .index      = offsetof(fd_features_t, migrate_config_program_to_core_bpf)>>3,
+    .id         = {"\x12\xa9\x4d\x90\xf1\x0d\xa9\xa9\x6c\x4d\xaf\xf9\x3b\x8e\xf5\xcb\x23\xef\xa4\xa9\x27\xee\x5c\x59\xc4\xef\x9c\x08\x45\x65\xdf\xac"},
+                  /* 2Fr57nzzkLYXW695UdDxDeR5fhnZWSttZeZYemrnpGFV */
+    .name       = "migrate_config_program_to_core_bpf",
+    .cleaned_up = {UINT_MAX, UINT_MAX, UINT_MAX} },
+
+  { .index      = offsetof(fd_features_t, migrate_address_lookup_table_program_to_core_bpf)>>3,
+    .id         = {"\xa5\x84\xb6\xe5\x4b\xa8\x34\x24\x94\xbb\xa3\x5d\x43\x00\x19\x22\x7e\x11\x1e\xb6\xba\xc9\x95\x77\xf9\xe1\x83\xa5\x46\x5d\xff\x48"},
+                  /* C97eKZygrkU4JxJsZdjgbUY7iQR7rKTr4NyDWo2E5pRm */
+    .name       = "migrate_address_lookup_table_program_to_core_bpf",
+    .cleaned_up = {UINT_MAX, UINT_MAX, UINT_MAX} },
+
   { .index = ULONG_MAX }
 };
 
@@ -1464,6 +1476,8 @@ fd_feature_id_query( ulong prefix ) {
   case 0x2c38e34ff071060d: return &ids[ 203 ];
   case 0x829062f252ef5ba8: return &ids[ 204 ];
   case 0xf46b1f18665c4236: return &ids[ 205 ];
+  case 0xa9a90df1904da912: return &ids[ 206 ];
+  case 0x2434a84be5b684a5: return &ids[ 207 ];
   default: break;
   }
 
@@ -1683,5 +1697,7 @@ FD_STATIC_ASSERT( offsetof( fd_features_t, enable_sbpf_v1_deployment_and_executi
 FD_STATIC_ASSERT( offsetof( fd_features_t, enable_sbpf_v2_deployment_and_execution                 )>>3==208UL, layout );
 FD_STATIC_ASSERT( offsetof( fd_features_t, enable_sbpf_v3_deployment_and_execution                 )>>3==209UL, layout );
 FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_feature_gate_program_to_core_bpf                )>>3==205UL, layout );
+FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_config_program_to_core_bpf                      )>>3==206UL, layout );
+FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_address_lookup_table_program_to_core_bpf        )>>3==207UL, layout );
 
 FD_STATIC_ASSERT( sizeof( fd_features_t )>>3==FD_FEATURE_ID_CNT, layout );

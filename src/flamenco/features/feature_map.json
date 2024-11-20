@@ -210,5 +210,7 @@
   {"name": "enable_sbpf_v2_deployment_and_execution", "pubkey": "F6UVKh1ujTEFK3en2SyAL3cdVnqko1FVEXWhmdLRu6WP"},
   {"name": "enable_sbpf_v3_deployment_and_execution", "pubkey": "C8XZNs1bfzaiT3YDeXZJ7G5swQWQv7tVzDnCxtHvnSpw"},
   {"name":"get_sysvar_syscall_enabled","pubkey":"CLCoTADvV64PSrnR6QXty6Fwrt9Xc6EdxSJE4wLRePjq"},
-  {"name":"migrate_feature_gate_program_to_core_bpf","pubkey":"4eohviozzEeivk1y9UbrnekbAFMDQyJz5JjA9Y6gyvky"}
+  {"name":"migrate_feature_gate_program_to_core_bpf","pubkey":"4eohviozzEeivk1y9UbrnekbAFMDQyJz5JjA9Y6gyvky"},
+  {"name":"migrate_config_program_to_core_bpf","pubkey":"2Fr57nzzkLYXW695UdDxDeR5fhnZWSttZeZYemrnpGFV"},
+  {"name":"migrate_address_lookup_table_program_to_core_bpf","pubkey":"C97eKZygrkU4JxJsZdjgbUY7iQR7rKTr4NyDWo2E5pRm"}
 ]

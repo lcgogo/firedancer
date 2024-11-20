@@ -4306,7 +4306,9 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
           - if NOT stateless: the existing account (for us its called `target_program_account`) 
       - target.program_data_address: `target_program_data_address` for us, derived below. */
 
-  /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/target_builtin.rs#L23-L50 */
+  /* These checks will fail if the core program has already been migrated to BPF, since the account will exist + the program owner
+     will no longer be the native loader.
+     https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/target_builtin.rs#L23-L50 */
   FD_BORROWED_ACCOUNT_DECL( target_program_account );
   uchar program_exists = ( fd_acc_mgr_view( slot_ctx->acc_mgr, slot_ctx->funk_txn, builtin_program_id, target_program_account )==FD_ACC_MGR_SUCCESS );
   if( !stateless ) {
@@ -4470,19 +4472,23 @@ fail:
 static void
 fd_apply_builtin_program_feature_transitions( fd_exec_slot_ctx_t * slot_ctx ) {
   FD_SCRATCH_SCOPE_BEGIN {
-    /* TODO: For new BPF programs, check if the feature is active and add logic to migrate them
-      to core BPF */
-
-    /* TODO: Set the upgrade authority properly from the core bpf migration config
+    /* TODO: Set the upgrade authority properly from the core bpf migration config. Right now it's set to None.
 
        Migrate any necessary stateless builtins to core BPF. So far, the only "stateless" builtin
-       is the Feature program.
+       is the Feature program. Beginning checks in the `migrate_builtin_to_core_bpf` function will
+       fail if the program has already been migrated to BPF.
        https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank.rs#L6776-L6793 */
     if( FD_FEATURE_ACTIVE( slot_ctx, migrate_feature_gate_program_to_core_bpf ) ) {
       fd_migrate_builtin_to_core_bpf( slot_ctx, NULL, &fd_solana_feature_program_id, &fd_solana_feature_program_buffer_address, 1 );
     }
 
+    if( FD_FEATURE_ACTIVE( slot_ctx, migrate_config_program_to_core_bpf ) ) {
+      fd_migrate_builtin_to_core_bpf( slot_ctx, NULL, &fd_solana_config_program_id, &fd_solana_config_program_buffer_address, 0 );
+    }
 
+    if( FD_FEATURE_ACTIVE( slot_ctx, migrate_address_lookup_table_program_to_core_bpf ) ) {
+      fd_migrate_builtin_to_core_bpf( slot_ctx, NULL, &fd_solana_address_lookup_table_program_id, &fd_solana_address_lookup_table_program_buffer_address, 0 );
+    }
   } FD_SCRATCH_SCOPE_END;
 }
 

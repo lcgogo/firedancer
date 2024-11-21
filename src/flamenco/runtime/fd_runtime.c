@@ -4387,9 +4387,7 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   /* Start a funk write txn */
   fd_funk_txn_t * parent_txn = slot_ctx->funk_txn;
   fd_funk_txn_xid_t migration_xid = fd_funk_generate_xid();
-  fd_funk_start_write( slot_ctx->acc_mgr->funk );
   slot_ctx->funk_txn = fd_funk_txn_prepare( slot_ctx->acc_mgr->funk, slot_ctx->funk_txn, &migration_xid, 0UL );
-  fd_funk_end_write( slot_ctx->acc_mgr->funk );
 
   /* Attempt serialization of program account. If the program is stateless, we want to create the account. Otherwise,
      we want a writable handle to modify the existing account.
@@ -4407,7 +4405,7 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
     FD_LOG_WARNING(( "Failed to write new program state to %s", FD_BASE58_ENC_32_ALLOCA( builtin_program_id ) ));
     goto fail;
   }
-
+  
   /* Create a new target program data account. */
   FD_BORROWED_ACCOUNT_DECL( new_target_program_data_account );
   err = fd_acc_mgr_modify( slot_ctx->acc_mgr, 
@@ -4458,18 +4456,14 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
      a BPF cache entry here because the program is technically "delayed visibility", so the program
      should not be invokable until the next slot. The cache entry will be created at the end of the 
      block as a part of the finalize routine. */
-  fd_funk_start_write( slot_ctx->acc_mgr->funk );
   fd_funk_txn_publish_into_parent( slot_ctx->acc_mgr->funk, slot_ctx->funk_txn, 1 );
-  fd_funk_end_write( slot_ctx->acc_mgr->funk );
   slot_ctx->funk_txn = parent_txn;
   return;
 
 fail:
-    /* Cancel the in-preparation transaction and discard any in-progress changes. */
-    fd_funk_start_write( slot_ctx->acc_mgr->funk );
-    fd_funk_txn_cancel( slot_ctx->acc_mgr->funk, slot_ctx->funk_txn, 0UL );
-    fd_funk_end_write( slot_ctx->acc_mgr->funk );
-    slot_ctx->funk_txn = parent_txn;
+  /* Cancel the in-preparation transaction and discard any in-progress changes. */
+  fd_funk_txn_cancel( slot_ctx->acc_mgr->funk, slot_ctx->funk_txn, 0UL );
+  slot_ctx->funk_txn = parent_txn;
 }
 
 static void

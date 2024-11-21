@@ -852,7 +852,13 @@ fd_snapshot_create_write_manifest_and_acc_vecs( fd_snapshot_ctx_t  * snapshot_ct
      be tracked down. This is mostly mitigated if you use scratch and 
      some other allocator for the accounts hash. */
 
-  fd_solana_manifest_serializable_destroy( &manifest, &destroy );
+  /* This is kind of a hack but we need to do this so we don't accidentally 
+     corrupt memory when we try to double destory. Everything below is
+     things that aren't stack allocated from the manifest including the banks.*/
+  // fd_solana_manifest_serializable_destroy( &manifest, &destroy );
+  fd_stakes_serializable_destroy( &manifest.bank.stakes, &destroy );
+  fd_block_hash_vec_destroy( &manifest.bank.blockhash_queue, &destroy );
+  fd_valloc_free( snapshot_ctx->valloc, manifest.bank.epoch_stakes );
   fd_epoch_bank_destroy( &snapshot_ctx->epoch_bank, &destroy );
   fd_slot_bank_destroy( &snapshot_ctx->slot_bank, &destroy );
   fd_valloc_free( snapshot_ctx->valloc, out_manifest );  

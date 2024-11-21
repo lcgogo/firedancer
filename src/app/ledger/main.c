@@ -107,9 +107,12 @@ struct fd_ledger_args {
   fd_tpool_t *          tpool;                   /* thread pool for execution */
   uchar                 tpool_mem[FD_TPOOL_FOOTPRINT( FD_TILE_MAX )] __attribute__( ( aligned( FD_TPOOL_ALIGN ) ) );
   uchar                 tpool_mem_two[FD_TPOOL_FOOTPRINT( FD_TILE_MAX )] __attribute__( ( aligned( FD_TPOOL_ALIGN ) ) );
+  uchar                 tpool_mem_three[FD_TPOOL_FOOTPRINT( FD_TILE_MAX )] __attribute__( ( aligned( FD_TPOOL_ALIGN ) ) );
+
   fd_spad_t *           spads[ 128UL ];          /* scratchpad allocators that are eventually assigned to each txn_ctx */
   ulong                 spad_cnt;                /* number of scratchpads, bounded by number of threads */
   fd_tpool_t *          snapshot_tpool;          /* thread pool for snapshot creation */
+  fd_tpool_t *          snapshot_bg_tpool;       /* thread pool for snapshot creation */
   ulong                 last_snapshot_slot;      /* last snapshot slot */
   int                   is_snapshotting;         /* determine if a snapshot is being created */
 
@@ -148,11 +151,14 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
 static int
 init_tpool( fd_ledger_args_t * ledger_args ) {
 
-  ulong snapshot_tcnt = ledger_args->snapshot_freq != ULONG_MAX ? ledger_args->snapshot_tcnt : 0UL;
+  ulong snapshot_tcnt = ledger_args->snapshot_freq != ULONG_MAX ? ledger_args->snapshot_tcnt: 0UL;
 
   ulong tcnt = fd_tile_cnt() - snapshot_tcnt;
   uchar * tpool_scr_mem = NULL;
   fd_tpool_t * tpool = NULL;
+
+
+  ulong start_idx = 1UL;
   if( tcnt>=1UL ) {
     tpool = fd_tpool_init( ledger_args->tpool_mem, tcnt );
     if( tpool == NULL ) {
@@ -164,18 +170,17 @@ init_tpool( fd_ledger_args_t * ledger_args ) {
       FD_LOG_ERR( ( "failed to allocate thread pool scratch space" ) );
     }
     for( ulong i=1UL; i<tcnt; ++i ) {
-      if( fd_tpool_worker_push( tpool, i, tpool_scr_mem + scratch_sz*(i-1UL), scratch_sz ) == NULL ) {
+      if( fd_tpool_worker_push( tpool, start_idx++, tpool_scr_mem + scratch_sz*(i-1UL), scratch_sz ) == NULL ) {
         FD_LOG_ERR(( "failed to launch worker" ));
       }
       else {
-        FD_LOG_NOTICE(( "launched worker" ));
+        FD_LOG_NOTICE(( "launched worker %lu", start_idx - 1UL ));
       }
     }
   }
 
   ledger_args->tpool = tpool;
 
-  /* If a snapshot is being created, setup its own tpool. */
 
   if( !snapshot_tcnt ) {
     return 0;
@@ -185,12 +190,32 @@ init_tpool( fd_ledger_args_t * ledger_args ) {
     FD_LOG_ERR(( "This is an invalid value for the number of threads to use for snapshot creation" ));
   }
 
-  fd_tpool_t * snapshot_tpool = fd_tpool_init( ledger_args->tpool_mem_two, snapshot_tcnt );
-  ulong        scratch_sz     = fd_scratch_smem_footprint( 256UL<<23UL );
-  tpool_scr_mem               = fd_valloc_malloc( ledger_args->slot_ctx->valloc, FD_SCRATCH_SMEM_ALIGN, scratch_sz );
-  for( ulong i=1UL; i<snapshot_tcnt; ++i ) {
-    if( FD_UNLIKELY( !fd_tpool_worker_push( snapshot_tpool, fd_tile_cnt() - i, tpool_scr_mem, scratch_sz ) ) ) {
+  fd_tpool_t * snapshot_bg_tpool = fd_tpool_init( ledger_args->tpool_mem_two, snapshot_tcnt );
+  ulong        scratch_sz        = fd_scratch_smem_footprint( 256UL<<20UL );
+  tpool_scr_mem                  = fd_valloc_malloc( ledger_args->slot_ctx->valloc, FD_SCRATCH_SMEM_ALIGN, scratch_sz );
+  if( FD_UNLIKELY( !fd_tpool_worker_push( snapshot_bg_tpool, start_idx++, tpool_scr_mem, scratch_sz ) ) ) {
       FD_LOG_ERR(( "failed to launch worker" ));
+  } else {
+    FD_LOG_NOTICE(( "launched worker 2 %lu", start_idx - 1UL ));
+  }
+
+  ledger_args->snapshot_bg_tpool = snapshot_bg_tpool;
+
+
+  if( snapshot_tcnt == 2 ) {
+    return 0;
+  }
+
+  /* If a snapshot is being created, setup its own tpool. */
+
+  fd_tpool_t * snapshot_tpool = fd_tpool_init( ledger_args->tpool_mem_three, snapshot_tcnt - 1UL );
+  scratch_sz                  = fd_scratch_smem_footprint( 256UL<<20UL );
+  tpool_scr_mem               = fd_valloc_malloc( ledger_args->slot_ctx->valloc, FD_SCRATCH_SMEM_ALIGN, scratch_sz );
+  for( ulong i=1UL; i<snapshot_tcnt - 1UL; ++i ) {
+    if( FD_UNLIKELY( !fd_tpool_worker_push( snapshot_tpool, start_idx++, tpool_scr_mem  + scratch_sz*(i-1UL), scratch_sz ) ) ) {
+      FD_LOG_ERR(( "failed to launch worker" ));
+    } else {
+      FD_LOG_NOTICE(( "launched worker 3 %lu", start_idx - 1UL ));
     }
   }
 
@@ -317,19 +342,19 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
         .slot           = ledger_args->slot_ctx->root_slot,
         .out_dir        = ledger_args->snapshot_dir,
         .is_incremental = 0,
-        .valloc         = fd_scratch_virtual(),
+        .valloc         = ledger_args->slot_ctx->valloc,
         .acc_mgr        = fd_acc_mgr_new( mem, ledger_args->slot_ctx->acc_mgr->funk ),
         .status_cache   = ledger_args->slot_ctx->status_cache,
-        .tpool          = fd_tpool_worker_cnt( ledger_args->snapshot_tpool ) > 2UL ? ledger_args->snapshot_tpool : NULL
+        .tpool          = ledger_args->snapshot_tpool
       };
 
-      fd_tpool_exec( ledger_args->snapshot_tpool, 1UL, fd_create_snapshot_task, NULL, 
+      fd_tpool_exec( ledger_args->snapshot_bg_tpool, 1UL, fd_create_snapshot_task, NULL, 
                      (ulong)&snapshot_ctx, (ulong)ledger_args, 0UL, NULL, 
                      0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL );
 
     } else if( ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL && !ledger_args->is_snapshotting && ledger_args->last_snapshot_slot ) {
       
-      FD_LOG_WARNING(("MAKE IT IN INCREMENTAL"));
+      FD_LOG_ERR(("MAKE IT IN INCREMENTAL"));
 
       uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
 

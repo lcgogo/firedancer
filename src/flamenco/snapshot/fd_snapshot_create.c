@@ -326,6 +326,9 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
     FD_LOG_WARNING(( "Unable to finish writing out file" ));
   }
 
+  fd_valloc_free( snapshot_ctx->valloc, snapshot_slot_keys );
+
+
   return 0;
 }
 
@@ -519,7 +522,9 @@ fd_snapshot_create_populate_bank( fd_snapshot_ctx_t *                snapshot_ct
   /* We need to copy over the stakes for two epochs despite the Agave client
      providing the stakes for 6 epochs. These stakes need to be copied over
      because of the fact that the leader schedule computation uses the two
-     previous epoch stakes. */
+     previous epoch stakes.
+     
+     TODO:FIXME: THis should be migrated over to using the versioned stakes. */
 
   fd_epoch_epoch_stakes_pair_t * relevant_epoch_stakes = fd_valloc_malloc( snapshot_ctx->valloc, FD_EPOCH_EPOCH_STAKES_PAIR_ALIGN, 2UL * sizeof(fd_epoch_epoch_stakes_pair_t) );
   fd_memset( &relevant_epoch_stakes[0], 0UL, sizeof(fd_epoch_epoch_stakes_pair_t) );
@@ -529,9 +534,9 @@ fd_snapshot_create_populate_bank( fd_snapshot_ctx_t *                snapshot_ct
   relevant_epoch_stakes[1].key                        = bank->epoch+1UL;
   relevant_epoch_stakes[1].value.stakes.vote_accounts = epoch_bank->next_epoch_stakes;
 
-  bank->epoch_stakes_len                      = 2UL;
-  bank->epoch_stakes                          = relevant_epoch_stakes;
-  bank->is_delta                              = snapshot_ctx->is_incremental;
+  bank->epoch_stakes_len = 2UL;
+  bank->epoch_stakes     = relevant_epoch_stakes;
+  bank->is_delta         = snapshot_ctx->is_incremental;
 
   /* The firedancer runtime currently maintains a version of the stakes which
      can't be reserialized into a format that is compatible with the Solana
@@ -727,6 +732,8 @@ fd_snapshot_create_write_status_cache( fd_snapshot_ctx_t *  snapshot_ctx ) {
 
   fd_txncache_flush_constipated_slots( snapshot_ctx->status_cache );
 
+  fd_valloc_free( snapshot_ctx->valloc, out_status_cache );
+
   return 0;
 
   } FD_SCRATCH_SCOPE_END;
@@ -793,6 +800,20 @@ fd_snapshot_create_write_manifest_and_acc_vecs( fd_snapshot_ctx_t  * snapshot_ct
   if( FD_UNLIKELY( !mem ) ) {
     return -1;
   }
+
+  fd_bincode_destroy_ctx_t destroy = {
+    .valloc  = snapshot_ctx->valloc
+  };
+
+  /* FIXME: A lot of the allocations can leak if the snaphshot loader 
+     fails out. There also might be some other leaks and this should 
+     be tracked down. This is mostly mitigated if you use scratch and 
+     some other allocator for the accounts hash. */
+
+  fd_solana_manifest_serializable_destroy( &manifest, &destroy );
+  fd_epoch_bank_destroy( &snapshot_ctx->epoch_bank, &destroy );
+  fd_slot_bank_destroy( &snapshot_ctx->slot_bank, &destroy );
+  fd_valloc_free( snapshot_ctx->valloc, out_manifest );  
 
   return 0;
 }
@@ -891,6 +912,10 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
   }
 
   cleanup:
+
+  fd_valloc_free( snapshot_ctx->valloc, in_buf );
+  fd_valloc_free( snapshot_ctx->valloc, zstd_buf );
+  fd_valloc_free( snapshot_ctx->valloc, out_buf );
 
   ZSTD_freeCStream( cstream ); /* Works even if cstream is null */
   err = fd_io_buffered_ostream_flush( ostream );

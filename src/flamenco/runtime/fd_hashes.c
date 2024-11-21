@@ -1033,7 +1033,7 @@ fd_accounts_hash( fd_funk_t          * funk,
       .lists = lists,
       .lthash_values = lthash_values,
       .valloc = valloc };
-    fd_tpool_exec_all_rrobin( tpool, 1UL, num_lists, fd_accounts_sorted_subrange_task, &task_info, NULL, NULL, 1, 0, num_lists );
+    fd_tpool_exec_all_rrobin( tpool, 0UL, num_lists, fd_accounts_sorted_subrange_task, &task_info, NULL, NULL, 1, 0, num_lists );
     fd_hash_account_deltas( lists, num_lists, accounts_hash );
     for( ulong i = 0; i < num_lists; ++i ) {
       fd_valloc_free( valloc, lists[i].pairs );

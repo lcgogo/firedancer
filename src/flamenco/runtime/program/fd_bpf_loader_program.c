@@ -886,7 +886,8 @@ process_loader_upgradeable_instruction( fd_exec_instr_ctx_t * instr_ctx ) {
       seeds[ 0UL ]    = (uchar *)new_program_id;
       ulong seed_sz   = sizeof(fd_pubkey_t);
       uchar bump_seed = 0;
-      err = fd_pubkey_find_program_address( instr_ctx, program_id, 1UL, seeds, &seed_sz, derived_address, &bump_seed );
+      err = fd_pubkey_find_program_address( program_id, 1UL, seeds, &seed_sz, derived_address, 
+                                            &bump_seed, &instr_ctx->txn_ctx->custom_err );
       if( FD_UNLIKELY( err ) ) {
         FD_LOG_ERR(( "Unable to find a viable program address bump seed" )); // Solana panics, error code is undefined
         return err;
@@ -937,7 +938,7 @@ process_loader_upgradeable_instruction( fd_exec_instr_ctx_t * instr_ctx ) {
 
       /* caller_program_id == program_id */
       fd_pubkey_t signers[ 1UL ];
-      err = fd_pubkey_derive_pda( instr_ctx, program_id, 1UL, seeds, &seed_sz, &bump_seed, signers );
+      err = fd_pubkey_derive_pda( program_id, 1UL, seeds, &seed_sz, &bump_seed, signers, &instr_ctx->txn_ctx->custom_err );
       if( FD_UNLIKELY( err ) ) {
         return err;
       }

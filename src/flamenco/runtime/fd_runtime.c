@@ -4336,13 +4336,13 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
 
   /* The program data account should not exist.
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/target_builtin.rs#L52-L62 */
-  fd_exec_instr_ctx_t * _mock_instr_ctx = fd_exec_instr_ctx_join( fd_exec_instr_ctx_new( fd_scratch_alloc( FD_EXEC_INSTR_CTX_ALIGN, FD_EXEC_INSTR_CTX_FOOTPRINT ) ) );
+  uint custom_err = UINT_MAX;
   fd_pubkey_t target_program_data_address[ 1UL ];
   uchar * seeds[ 1UL ];
   seeds[ 0UL ]    = (uchar *)builtin_program_id;
   ulong seed_sz   = sizeof(fd_pubkey_t);
   uchar bump_seed = 0;
-  err = fd_pubkey_derive_pda( _mock_instr_ctx, &fd_solana_bpf_loader_upgradeable_program_id, 1UL, seeds, &seed_sz, &bump_seed, target_program_data_address );
+  err = fd_pubkey_find_program_address( &fd_solana_bpf_loader_upgradeable_program_id, 1UL, seeds, &seed_sz, target_program_data_address, &bump_seed, &custom_err );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_ERR(( "Unable to find a viable program address bump seed" )); // Solana panics, error code is undefined
     return;
@@ -4378,9 +4378,11 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
       so we can skip the checks here.
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/source_buffer.rs#L37-L47 */
 
-  /* This check is done a bit prematurely because we calculate the previous account state's lamports.
+  /* This check is done a bit prematurely because we calculate the previous account state's lamports. We use 0 for starting lamports
+     for stateless accounts because they don't yet exist.
+
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L277-L280 */
-  ulong lamports_to_burn = target_program_account->const_meta->info.lamports + source_buffer_account->const_meta->info.lamports;
+  ulong lamports_to_burn = ( stateless ? 0UL : target_program_account->const_meta->info.lamports ) + source_buffer_account->const_meta->info.lamports;
 
   /* Start a funk write txn */
   fd_funk_txn_t * parent_txn = slot_ctx->funk_txn;

@@ -4230,12 +4230,12 @@ fd_new_target_program_data_account( fd_exec_slot_ctx_t *    slot_ctx,
   }
 
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L118-L125 */
-  if( config_upgrade_authority_address!=NULL && state.inner.buffer.authority_address!=NULL ) {
-    if( FD_UNLIKELY( memcmp( config_upgrade_authority_address, state.inner.buffer.authority_address, sizeof(fd_pubkey_t) ) ) ) {
+  if( config_upgrade_authority_address!=NULL ) {
+    if( FD_UNLIKELY( state.inner.buffer.authority_address==NULL ||
+                   ( state.inner.buffer.authority_address!=NULL && 
+                     memcmp( config_upgrade_authority_address, state.inner.buffer.authority_address, sizeof(fd_pubkey_t) ) ) ) ) {
       return -1;
     }
-  } else if( config_upgrade_authority_address!=state.inner.buffer.authority_address ) {
-    return -1;
   }
 
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L127-L132 */

@@ -68,6 +68,27 @@ struct fd_snapshot_ctx {
 };
 typedef struct fd_snapshot_ctx fd_snapshot_ctx_t;
 
+/* fd_snapshot_create_populate_fseq, fd_snapshot_create_is_incremental, and
+   fd_snapshot_create_get_slot are helpers used to pack and unpack the fseq
+   used to indicate if a snapshot is ready to be created and if funk should be
+   constipated. The other bytes represent the slot that the snapshot will be
+   created for. */
+
+static ulong FD_FN_UNUSED
+fd_snapshot_create_pack_fseq( ulong is_constipated, ulong smr ) {
+  return (is_constipated << 56UL) | (smr & 0xFFFFFFFFFFFFFFUL);
+}
+
+static ulong FD_FN_UNUSED
+fd_snapshot_create_get_is_incremental( ulong fseq ) {
+  return (fseq >> 56UL) & 0xFF;
+}
+
+static ulong FD_FN_UNUSED
+fd_snapshot_create_get_slot( ulong fseq ) {
+  return fseq & 0xFFFFFFFFFFFFFFUL;
+}
+
 /* fd_snapshot_create_new_snapshot is responsible for creating the different
    structures used for snapshot generation and outputting them to a servable,
    compressed tarball. The main components of a Solana snapshot are as follows:

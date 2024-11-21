@@ -33,6 +33,7 @@
 #include "../../../../choreo/fd_choreo.h"
 #include "../../../../disco/store/fd_epoch_forks.h"
 #include "../../../../funk/fd_funk_filemap.h"
+#include "../../../../flamenco/snapshot/fd_snapshot_create.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -249,9 +250,12 @@ struct fd_replay_tile_ctx {
   ulong       spad_cnt;
 
 
-  ulong   snapshot_interval;   /* User defined parameter */
-  ulong * is_funk_constipated; /* Shared fseq to determine if funk/status cache should be constipated */
-  ulong   prev_snapshot_gap;   /* Tracking for snapshot creation */
+  ulong   snapshot_interval;    /* User defined parameter */
+  ulong   incremental_interval; /* User defined parameter */
+  ulong   last_full_snap;    /* If a full snapshot has been produced */
+
+  ulong * is_funk_constipated;  /* Shared fseq to determine if funk/status cache should be constipated */
+  ulong   prev_snapshot_gap;    /* Tracking for snapshot creation */
 };
 typedef struct fd_replay_tile_ctx fd_replay_tile_ctx_t;
 
@@ -658,14 +662,25 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
      interval and no snapshot is currently in progress. This is to handle the
      case where the snapshot interval falls on a skipped slot. */
 
-  ulong curr_snapshot_gap = smr % ctx->snapshot_interval;
-  int   is_snapshot_ready = curr_snapshot_gap < ctx->prev_snapshot_gap && 
-                            !fd_fseq_query( ctx->is_funk_constipated );
+  ulong curr_snapshot_gap      = smr % ctx->snapshot_interval;
+  ulong is_constipated         = fd_fseq_query( ctx->is_funk_constipated );
+  uchar is_full_snapshot_ready = curr_snapshot_gap < ctx->prev_snapshot_gap && !is_constipated;
+  uchar is_inc_snapshot_ready  = smr % ctx->incremental_interval == 0 && !is_constipated && ctx->last_full_snap; /* TODO: add snapshot gap accounting here */ 
+          
   ctx->prev_snapshot_gap  = curr_snapshot_gap;
 
-  if( is_snapshot_ready ) {
-    FD_LOG_WARNING(("CONSTIPATING AFTER ROOTING SLOT %lu", smr));
-    fd_fseq_update( ctx->is_funk_constipated, smr );
+  ulong updated_fseq = 0UL;
+  if( is_full_snapshot_ready || is_inc_snapshot_ready ) {
+    if( is_full_snapshot_ready ) {
+      ctx->last_full_snap = smr;
+      updated_fseq = fd_snapshot_create_pack_fseq( 0, smr );
+    } else {
+      updated_fseq = fd_snapshot_create_pack_fseq( 1, smr );
+    }
+    fd_fseq_update( ctx->is_funk_constipated, updated_fseq );
+
+    FD_LOG_WARNING(("CONSTIPATING AFTER ROOTING SLOT %lu %lu", fd_snapshot_create_get_is_incremental( updated_fseq ),
+                                                               fd_snapshot_create_get_slot( updated_fseq ) ));
   }
 
   if( FD_UNLIKELY( ctx->capture_ctx ) ) {
@@ -1716,7 +1731,11 @@ unprivileged_init( fd_topo_t *      topo,
   /* snapshot                                                           */
   /**********************************************************************/
 
-  ctx->snapshot_interval = tile->replay.snapshot_interval ? tile->replay.snapshot_interval : ULONG_MAX;
+  ctx->snapshot_interval    = tile->snaps.full_interval ? tile->snaps.full_interval : ULONG_MAX;
+  ctx->incremental_interval = tile->snaps.incremental_interval ? tile->snaps.incremental_interval : ULONG_MAX;
+  ctx->last_full_snap       = 0UL;
+
+  FD_LOG_WARNING(("INTERVALS %lu %lu", ctx->snapshot_interval, ctx->incremental_interval));
 
   /**********************************************************************/
   /* funk                                                               */

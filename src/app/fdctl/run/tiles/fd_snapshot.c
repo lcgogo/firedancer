@@ -18,7 +18,8 @@
 
 
 struct fd_snapshot_tile_ctx {
-  ulong           interval;
+  ulong           full_interval;
+  ulong           incremental_interval;
   char const    * out_dir;
   fd_funk_t     * funk;
   fd_txncache_t * status_cache;
@@ -27,6 +28,8 @@ struct fd_snapshot_tile_ctx {
 
   int             tmp_fd;
   int             snapshot_fd;
+
+  ulong           last_full_snap;
 
   uchar           tpool_mem[FD_TPOOL_FOOTPRINT( FD_TILE_MAX )] __attribute__( ( aligned( FD_TPOOL_ALIGN ) ) );
   fd_tpool_t *    tpool;
@@ -130,10 +133,11 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   void * scratch_fmem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   ulong  scratch_alloc_mem   = FD_SCRATCH_ALLOC_FINI  ( l, scratch_align() );
 
-  ctx->interval    = tile->snaps.interval;
-  ctx->out_dir     = tile->snaps.out_dir;
-  ctx->tmp_fd      = tile->snaps.tmp_fd;
-  ctx->snapshot_fd = tile->snaps.snapshot_fd;
+  ctx->full_interval        = tile->snaps.full_interval;
+  ctx->incremental_interval = tile->snaps.incremental_interval;
+  ctx->out_dir              = tile->snaps.out_dir;
+  ctx->tmp_fd               = tile->snaps.tmp_fd;
+  ctx->snapshot_fd          = tile->snaps.snapshot_fd;
 
   /**********************************************************************/
   /* tpool                                                              */
@@ -207,6 +211,10 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   fd_fseq_update( ctx->is_constipated, 0UL );
   FD_TEST( 0UL==fd_fseq_query( ctx->is_constipated ) );
 
+  /* TODO:FIXME: document this */
+
+  ctx->last_full_snap = 0UL;
+
 }
 
 static void
@@ -219,22 +227,30 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
 
   if( FD_UNLIKELY( is_constipated ) ) {
 
-    FD_LOG_WARNING(("STARTING TO CREATE A NEW SNAPSHOT"));
+    ulong is_incremental = fd_snapshot_create_get_is_incremental( is_constipated );
+    ulong snapshot_slot  = fd_snapshot_create_get_slot( is_constipated );
+
+    if( !is_incremental ) {
+      ctx->last_full_snap = snapshot_slot;
+    }
+    
+    FD_LOG_WARNING(("CREATING SNAPSHOT %lu %lu", is_incremental, snapshot_slot));
 
     uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
 
     FD_TEST( ctx->tpool );
 
     fd_snapshot_ctx_t snapshot_ctx = {
-      .slot           = is_constipated,
+      .slot           = snapshot_slot,
       .out_dir        = ctx->out_dir,
-      .is_incremental = 0,
+      .is_incremental = (uchar)is_incremental,
       .valloc         = fd_scratch_virtual(),
       .acc_mgr        = fd_acc_mgr_new( mem, ctx->funk ),
       .status_cache   = ctx->status_cache,
       .tmp_fd         = ctx->tmp_fd,
       .snapshot_fd    = ctx->snapshot_fd,
-      .tpool          = ctx->tpool
+      .tpool          = ctx->tpool,
+
     };
 
     /* If this isn't the first snapshot that this tile is creating, the

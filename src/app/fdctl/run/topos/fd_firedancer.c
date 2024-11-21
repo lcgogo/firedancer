@@ -635,7 +635,6 @@ fd_topo_initialize( config_t * config ) {
       }
       strncpy( tile->replay.cluster_version, config->tiles.replay.cluster_version, sizeof(tile->replay.cluster_version) );
       tile->replay.bank_tile_count = config->layout.bank_tile_count;
-      tile->replay.snapshot_interval = config->tiles.snaps.interval;
       tile->replay.in_wen_restart = config->tiles.replay.in_wen_restart;
       fd_memcpy( tile->replay.wen_restart_coordinator, config->tiles.replay.wen_restart_coordinator, FD_BASE58_ENCODED_32_SZ );
 
@@ -693,7 +692,8 @@ fd_topo_initialize( config_t * config ) {
       tile->rpcserv.tpu_ip_addr = config->tiles.net.ip_addr;
       strncpy( tile->rpcserv.identity_key_path, config->consensus.identity_path, sizeof(tile->rpcserv.identity_key_path) );
     } else if( FD_UNLIKELY( !strcmp( tile->name, "snaps" ) ) ) {
-      tile->snaps.interval = config->tiles.snaps.interval;
+      tile->snaps.full_interval        = config->tiles.snaps.full_interval;
+      tile->snaps.incremental_interval = config->tiles.snaps.incremental_interval;
       strncpy( tile->snaps.out_dir, config->tiles.snaps.out_dir, sizeof(tile->snaps.out_dir) );
       tile->snaps.tpool_thread_count = config->tiles.snaps.tpool_thread_count;
     } else {

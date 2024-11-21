@@ -300,7 +300,8 @@ typedef struct {
     } store_int;
 
     struct {
-      ulong interval;
+      ulong full_interval;
+      ulong incremental_interval;
       char  out_dir[ PATH_MAX ];
       ulong tpool_thread_count;
     } snaps;

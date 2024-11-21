@@ -1129,6 +1129,89 @@ fd_accounts_hash_inc_only( fd_exec_slot_ctx_t * slot_ctx, fd_hash_t *accounts_ha
 }
 
 int
+fd_accounts_hash_inc_no_txn( fd_funk_t *                 funk, 
+                             fd_valloc_t                 valloc, 
+                             fd_hash_t *                 accounts_hash, 
+                             fd_funk_rec_key_t const * * pubkeys,
+                             ulong                       pubkeys_len,
+                             ulong                       do_hash_verify ) {
+  FD_LOG_NOTICE(( "accounts_hash_inc_no_txn" ));
+
+  fd_wksp_t *     wksp    = fd_funk_wksp( funk );
+  fd_funk_rec_t * rec_map = fd_funk_rec_map( funk, wksp );
+
+  // How many total records are we dealing with?
+  ulong                   num_iter_accounts = fd_funk_rec_map_key_cnt( rec_map );
+  ulong                   num_pairs         = 0UL;
+  fd_pubkey_hash_pair_t * pairs             = fd_valloc_malloc( valloc, 
+                                                                FD_PUBKEY_HASH_PAIR_ALIGN, 
+                                                                num_iter_accounts * sizeof(fd_pubkey_hash_pair_t) );
+  
+  if( FD_UNLIKELY( !pairs ) ) {
+    FD_LOG_ERR(( "failed to allocate memory for pairs" ));
+  }
+
+  fd_blake3_t * b3 = NULL;
+
+  FD_SCRATCH_SCOPE_BEGIN {
+
+  for( ulong i=0UL; i<pubkeys_len; i++ ) {
+    fd_funk_rec_t const * rec = fd_funk_rec_query( funk, NULL, pubkeys[i] );
+
+    fd_account_meta_t * metadata = (fd_account_meta_t *) fd_funk_val_const( rec, wksp );
+    int is_empty = (metadata->info.lamports == 0);
+
+    if( is_empty ) {
+      pairs[num_pairs].rec = rec;
+
+      fd_hash_t * hash = fd_scratch_alloc( alignof(fd_hash_t), sizeof(fd_hash_t) );
+      if( !b3 ) {
+        b3 = fd_scratch_alloc( alignof(fd_blake3_t), sizeof(fd_blake3_t) );
+      }
+      fd_blake3_init  ( b3 );
+      fd_blake3_append( b3, rec->pair.key->uc, sizeof(fd_pubkey_t) );
+      fd_blake3_fini  ( b3, hash );
+
+      pairs[ num_pairs ].hash = hash;
+      num_pairs++;
+      continue;
+    } else {
+      fd_hash_t *h = (fd_hash_t*)metadata->hash;
+      if( !(h->ul[ 0 ] | h->ul[ 1 ] | h->ul[ 2 ] | h->ul[ 3 ]) ) {
+        // By the time we fall into this case, we can assume the ignore_slot feature is enabled...
+        fd_hash_account_current( (uchar*)metadata->hash, NULL, metadata, rec->pair.key->uc, fd_account_get_data( metadata ) );
+      } else if( do_hash_verify ) {
+        uchar hash[ FD_HASH_FOOTPRINT ];
+        fd_hash_account_current( (uchar*)&hash, NULL, metadata, rec->pair.key->uc, fd_account_get_data( metadata ) );
+        if( fd_acc_exists( metadata ) && memcmp( metadata->hash, &hash, FD_HASH_FOOTPRINT ) ) {
+          FD_LOG_WARNING(( "snapshot hash (%s) doesn't match calculated hash (%s)", FD_BASE58_ENC_32_ALLOCA(metadata->hash), FD_BASE58_ENC_32_ALLOCA(&hash) ));
+        }
+      }
+    }
+
+    if( (metadata->info.executable & ~1) ) {
+      continue;
+    }
+
+    pairs[ num_pairs ].rec = rec;
+    pairs[ num_pairs ].hash = (fd_hash_t const *)metadata->hash;
+    num_pairs++;
+  }
+
+  sort_pubkey_hash_pair_inplace( pairs, num_pairs );
+  fd_pubkey_hash_pair_list_t list1 = { .pairs = pairs, .pairs_len = num_pairs };
+  fd_hash_account_deltas( &list1, 1, accounts_hash );
+
+  fd_valloc_free( valloc, pairs );
+
+  } FD_SCRATCH_SCOPE_END;
+
+  FD_LOG_INFO(( "accounts_hash %s", FD_BASE58_ENC_32_ALLOCA( accounts_hash->hash) ));
+
+  return 0;
+}
+
+int
 fd_snapshot_hash( fd_exec_slot_ctx_t * slot_ctx, fd_tpool_t * tpool, fd_hash_t * accounts_hash, uint check_hash ) {
   (void) check_hash;
 

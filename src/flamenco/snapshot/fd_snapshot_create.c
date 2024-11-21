@@ -35,6 +35,10 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
   fd_pubkey_t * * snapshot_slot_keys    = fd_valloc_malloc( snapshot_ctx->valloc, alignof(fd_pubkey_t*), sizeof(fd_pubkey_t*) * FD_WRITABLE_ACCS_IN_SLOT );
   ulong           snapshot_slot_key_cnt = 0UL;
 
+  /* TODO:FIXME: a better bound here */
+  fd_funk_rec_key_t const * * incremental_keys    = fd_valloc_malloc( snapshot_ctx->valloc, alignof(fd_funk_rec_key_t*), sizeof(fd_funk_rec_key_t*) * 10000000 );
+  ulong                       incremental_key_cnt = 0UL;
+
   /* In order to size out the accounts DB index in the manifest, we must
      iterate through funk and accumulate the size of all of the records
      from all slots before the snapshot_slot. slot */
@@ -56,6 +60,15 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
     if( metadata->magic!=FD_ACCOUNT_META_MAGIC ) {
       continue;
+    }
+
+    if( snapshot_ctx->is_incremental ) {
+      /* We only care about accounts that were modified since the last
+         snapshot slot. */
+      if( metadata->slot<=snapshot_ctx->last_snap_slot ) {
+        continue;
+      }
+      incremental_keys[ incremental_key_cnt++ ] = rec->pair.key;
     }
 
     /* We know that all of the accounts from the snapshot slot can fit into
@@ -103,14 +116,31 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
     accounts_db->storages[ i ].slot                      = snapshot_ctx->slot - i;
   }
 
-  /* Populate the snapshot hash into the accounts db. */
 
-  int err = fd_snapshot_service_hash( &accounts_db->bank_hash_info.snapshot_hash, 
-                                      &snapshot_ctx->slot_bank,
-                                      &snapshot_ctx->epoch_bank, 
-                                      snapshot_ctx->acc_mgr->funk,
-                                      snapshot_ctx->tpool,
-                                      snapshot_ctx->valloc );
+
+  /* At this point we have iterated through all of the accounts and created
+     the index. We are now ready to generate a snapshot hash. */
+
+  int err;
+  if( !snapshot_ctx->is_incremental ) {
+    err = fd_snapshot_service_hash( &accounts_db->bank_hash_info.snapshot_hash, 
+                                    &snapshot_ctx->slot_bank,
+                                    &snapshot_ctx->epoch_bank, 
+                                    snapshot_ctx->acc_mgr->funk,
+                                    snapshot_ctx->tpool,
+                                    snapshot_ctx->valloc );
+  } else {
+    FD_LOG_WARNING(("STARTING INCREMENTAL HASH %lu", incremental_key_cnt ));
+    err = fd_accounts_hash_inc_no_txn( snapshot_ctx->acc_mgr->funk,
+                                       snapshot_ctx->valloc, 
+                                       &accounts_db->bank_hash_info.snapshot_hash,
+                                       incremental_keys,
+                                       incremental_key_cnt,
+                                       0UL );
+    fd_valloc_free( snapshot_ctx->valloc, incremental_keys );
+    FD_LOG_WARNING(("FINISHING INCREMENTAL HASH"));
+  }
+
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Unable to calculate snapshot hash" ));
     return -1;
@@ -132,16 +162,19 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
     FD_LOG_WARNING(( "Unable to format manifest name string" ));
     return -1;
   }
+
   err = fd_tar_writer_new_file( writer, buffer );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Unable to create snapshot manifest file" ));
     return -1;
   }
+  
   err = fd_tar_writer_make_space( writer, manifest_sz );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Unable to make space for snapshot manifest file" ));
     return -1;
   }
+
   err = fd_tar_writer_fini_file( writer );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Unable to finalize snapshot manifest file" ));
@@ -161,12 +194,15 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
     FD_LOG_WARNING(( "Unable to format previous accounts name string" ));
     return -1;
   }
+
   err = fd_tar_writer_new_file( writer, buffer );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Unable to create previous accounts file" ));
     return -1;
   }
 
+  /* TODO: factor this out and switch between incremental and non-incremental
+     since we already have the keys that we need*/
   for( fd_funk_rec_t const * rec = fd_funk_txn_first_rec( funk, NULL ); NULL != rec; rec = fd_funk_txn_next_rec( funk, rec ) ) {
 
     /* Get the account data. */
@@ -185,6 +221,10 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
     if( metadata->magic!=FD_ACCOUNT_META_MAGIC ) {
       continue;
+    } 
+
+    if( snapshot_ctx->is_incremental && metadata->slot<=snapshot_ctx->last_snap_slot ) {
+      continue;
     }
 
     uchar const * acc_data = raw + metadata->hlen;
@@ -200,7 +240,7 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
 
     ulong new_sz = prev_accs->file_sz + sizeof(fd_solana_account_hdr_t) + fd_ulong_align_up( metadata->dlen, FD_SNAPSHOT_ACC_ALIGN );
 
-    if( new_sz > FD_SNAPSHOT_APPEND_VEC_SZ_MAX ) {
+    if( new_sz>FD_SNAPSHOT_APPEND_VEC_SZ_MAX ) {
 
       /* When the current append vec is full, finish writing it, start writing 
          into the next append vec. */
@@ -240,11 +280,13 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
       FD_LOG_WARNING(( "Unable to stream out account header to tar archive" ));
       return -1;
     }
+
     err = fd_tar_writer_write_file_data( writer, acc_data, metadata->dlen );
     if( FD_UNLIKELY( err ) ) {
       FD_LOG_WARNING(( "Unable to stream out account data to tar archive" ));
       return -1;
     }
+
     ulong align_sz = fd_ulong_align_up( metadata->dlen, FD_SNAPSHOT_ACC_ALIGN ) - metadata->dlen;
     err = fd_tar_writer_write_file_data( writer, padding, align_sz );
     if( FD_UNLIKELY( err ) ) {

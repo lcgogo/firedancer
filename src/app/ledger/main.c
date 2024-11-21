@@ -151,7 +151,8 @@ fd_create_snapshot_task( void FD_PARAM_UNUSED *tpool,
 static int
 init_tpool( fd_ledger_args_t * ledger_args ) {
 
-  ulong snapshot_tcnt = ledger_args->snapshot_freq != ULONG_MAX ? ledger_args->snapshot_tcnt: 0UL;
+  // ulong snapshot_tcnt = ledger_args->snapshot_freq != ULONG_MAX ? ledger_args->snapshot_tcnt: 0UL;
+  ulong snapshot_tcnt = ledger_args->snapshot_tcnt;
 
   ulong tcnt = fd_tile_cnt() - snapshot_tcnt;
   uchar * tpool_scr_mem = NULL;
@@ -353,9 +354,7 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
                      0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL );
 
     } else if( ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL && !ledger_args->is_snapshotting && ledger_args->last_snapshot_slot ) {
-      
-      FD_LOG_ERR(("MAKE IT IN INCREMENTAL"));
-
+    
       uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
 
       ledger_args->is_snapshotting = 1;
@@ -364,14 +363,16 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
         .slot           = ledger_args->slot_ctx->root_slot,
         .out_dir        = ledger_args->snapshot_dir,
         .is_incremental = 1,
-        .valloc         = fd_scratch_virtual(),
+        .valloc         = ledger_args->slot_ctx->valloc,
         .acc_mgr        = fd_acc_mgr_new( mem, ledger_args->slot_ctx->acc_mgr->funk ),
         .status_cache   = ledger_args->slot_ctx->status_cache,
         .last_snap_slot = ledger_args->last_snapshot_slot, /* TODO:FIXME: make it clear that this implies last full snapshot */
-        .tpool          = fd_tpool_worker_cnt( ledger_args->snapshot_tpool ) > 2UL ? ledger_args->snapshot_tpool : NULL
+        .tpool          = ledger_args->snapshot_tpool
       };
 
-      fd_tpool_exec( ledger_args->snapshot_tpool, 1UL, fd_create_snapshot_task, NULL, 
+      FD_LOG_WARNING(("STARTING INCREMENTAL SNPASHOTTTING"));
+
+      fd_tpool_exec( ledger_args->snapshot_bg_tpool, 1UL, fd_create_snapshot_task, NULL, 
                      (ulong)&snapshot_ctx, (ulong)ledger_args, 0UL, NULL, 
                      0UL, 0UL, 0UL, 0UL, 0UL, 0UL, 0UL );
     }

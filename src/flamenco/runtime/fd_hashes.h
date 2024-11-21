@@ -73,6 +73,17 @@ fd_accounts_hash_inc_only( fd_exec_slot_ctx_t * slot_ctx,
                            fd_funk_txn_t * child_txn,
                            ulong do_hash_verify );
 
+/* Same as fd_accounts_hash_inc_only but takes a list of pubkeys to hash.
+   Query the accounts from the root of funk. This is done as a read-only
+   way to generate an accounts hash from a subset of accounts from funk. */
+int
+fd_accounts_hash_inc_no_txn( fd_funk_t *                 funk,
+                             fd_valloc_t                 valloc,
+                             fd_hash_t *                 accounts_hash,
+                             fd_funk_rec_key_t const * * pubkeys,
+                             ulong                       pubkeys_len,
+                             ulong                       do_hash_verify );
+
 /* Generate a non-incremental hash of the entire account database, including epoch bank hash. */
 int
 fd_snapshot_hash( fd_exec_slot_ctx_t * slot_ctx,

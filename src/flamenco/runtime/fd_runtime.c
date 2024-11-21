@@ -2879,8 +2879,8 @@ fd_runtime_publish_old_txns( fd_exec_slot_ctx_t * slot_ctx,
         }
       } else {
         slot_ctx->root_slot = txn->xid.ul[0];
-        if( slot_ctx->root_slot % slot_ctx->snapshot_freq == 0 ) { //  || (slot_ctx->root_slot % slot_ctx->incremental_freq == 0 && slot_ctx->last_snapshot_slot) ) {
-          //if( slot_ctx->root_slot % slot_ctx->snapshot_freq == 0 ) {
+        if( slot_ctx->root_slot % slot_ctx->snapshot_freq == 0 || (slot_ctx->root_slot % slot_ctx->incremental_freq == 0 && slot_ctx->last_snapshot_slot) ) {
+
           slot_ctx->last_snapshot_slot = slot_ctx->root_slot;
           FD_LOG_WARNING(("CONSTIPATING"));
           slot_ctx->epoch_ctx->constipate_root = 1;

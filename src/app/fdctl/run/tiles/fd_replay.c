@@ -673,8 +673,10 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
   if( is_full_snapshot_ready || is_inc_snapshot_ready ) {
     if( is_full_snapshot_ready ) {
       ctx->last_full_snap = smr;
+      FD_LOG_WARNING(("CREATING FULL SNAPSHOT"));
       updated_fseq = fd_snapshot_create_pack_fseq( 0, smr );
     } else {
+      FD_LOG_WARNING(("CREATING INCREMENTAL SNAPSHOT"));
       updated_fseq = fd_snapshot_create_pack_fseq( 1, smr );
     }
     fd_fseq_update( ctx->is_funk_constipated, updated_fseq );
@@ -1731,8 +1733,8 @@ unprivileged_init( fd_topo_t *      topo,
   /* snapshot                                                           */
   /**********************************************************************/
 
-  ctx->snapshot_interval    = tile->snaps.full_interval ? tile->snaps.full_interval : ULONG_MAX;
-  ctx->incremental_interval = tile->snaps.incremental_interval ? tile->snaps.incremental_interval : ULONG_MAX;
+  ctx->snapshot_interval    = tile->replay.full_interval ? tile->replay.full_interval : ULONG_MAX;
+  ctx->incremental_interval = tile->replay.incremental_interval ? tile->replay.incremental_interval : ULONG_MAX;
   ctx->last_full_snap       = 0UL;
 
   FD_LOG_WARNING(("INTERVALS %lu %lu", ctx->snapshot_interval, ctx->incremental_interval));

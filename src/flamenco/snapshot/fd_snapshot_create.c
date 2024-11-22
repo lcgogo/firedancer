@@ -684,6 +684,21 @@ fd_snapshot_create_setup_and_validate_ctx( fd_snapshot_ctx_t * snapshot_ctx ) {
 
   /* TODO: Fill out other things to validate here. */
 
+  if( FD_UNLIKELY( ftruncate( snapshot_ctx->tmp_fd, 0UL ) < 0 ) ) {
+    FD_LOG_WARNING(( "Failed to truncate the temporary file" ));
+    return -1;
+  }
+
+  lseek( snapshot_ctx->tmp_fd, 0, SEEK_SET );
+
+  if( FD_UNLIKELY( ftruncate( snapshot_ctx->snapshot_fd, 0UL ) < 0 ) ) {
+    FD_LOG_WARNING(( "Failed to truncate the snapshot file" ));
+    return -1;
+  }
+  
+  lseek( snapshot_ctx->snapshot_fd, 0, SEEK_SET );
+
+
   return 0;
 }
 
@@ -979,7 +994,7 @@ fd_snapshot_create_compress( fd_snapshot_ctx_t * snapshot_ctx ) {
      snapshot file readable and servable. */
 
   char tmp_directory_buf_zstd[ FD_SNAPSHOT_DIR_MAX ];
-  err = snprintf( tmp_directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/%s", snapshot_ctx->out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
+  err = snprintf( tmp_directory_buf_zstd, FD_SNAPSHOT_DIR_MAX, "%s/%s", snapshot_ctx->out_dir, snapshot_ctx->is_incremental ? FD_SNAPSHOT_TMP_INCR_ARCHIVE_ZSTD : FD_SNAPSHOT_TMP_FULL_ARCHIVE_ZSTD );
   if( FD_UNLIKELY( err<0 ) ) {
     FD_LOG_WARNING(( "Failed to format directory string" ));
     return -1;

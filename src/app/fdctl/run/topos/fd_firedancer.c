@@ -646,6 +646,12 @@ fd_topo_initialize( config_t * config ) {
       tile->replay.vote = config->consensus.vote;
       strncpy( tile->replay.vote_account_path, config->consensus.vote_account_path, sizeof(tile->replay.vote_account_path) );
 
+
+      tile->replay.full_interval       = config->tiles.snaps.full_interval;
+      tile->replay.incremental_interval = config->tiles.snaps.incremental_interval;
+
+      FD_LOG_NOTICE(("ASDF ASDF %lu %lu", tile->replay.full_interval, tile->replay.incremental_interval));
+
       FD_LOG_NOTICE(("config->consensus.identity_path: %s", config->consensus.identity_path));
       FD_LOG_NOTICE(("config->consensus.vote_account_path: %s", config->consensus.vote_account_path));
 

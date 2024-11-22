@@ -1,9 +1,9 @@
 # logfile_fd: It can be disabled by configuration, but typically tiles
 #             will open a log file on boot and write all messages there.
 # tmp_fd: This is used to write out a tar archive file
-# snapshot_fd: This is used to create a final snapshot by compressing
+# full_snapshot_fd: This is used to create a final snapshot by compressing
                the contents of tmp_fd
-unsigned int logfile_fd, unsigned int tmp_fd, unsigned int snapshot_fd
+unsigned int logfile_fd, unsigned int tmp_fd, unsigned int full_snapshot_fd, unsigned int incremental_snapshot_fd
 
 # logging: all log messages are written to a file and/or pipe
 #
@@ -15,7 +15,8 @@ unsigned int logfile_fd, unsigned int tmp_fd, unsigned int snapshot_fd
 write: (or (eq (arg 0) 2)
            (eq (arg 0) logfile_fd)
            (eq (arg 0) tmp_fd)
-           (eq (arg 0) snapshot_fd))
+           (eq (arg 0) full_snapshot_fd)
+           (eq (arg 0) incremental_snapshot_fd))
 
 # logging: 'WARNING' and above fsync the logfile to disk immediately
 #
@@ -33,7 +34,10 @@ fsync: (eq (arg 0) logfile_fd)
 # read the snapshot file.
 # fchmod: (or (and (eq (arg 0) tmp_fd)
 #                  (eq (arg 1) "S_IRUSR|S_IWUSR")) 
-#             (and (eq (arg 0) snapshot_fd)
+#             (and (eq (arg 0) full_snapshot_fd)
+#                  (or (eq (arg 1) "S_IRUSR|S_IWUSR")
+#                      (eq (arg 1) "S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH")))
+#             (and (eq (arg 0) incremental_snapshot_fd)
 #                  (or (eq (arg 1) "S_IRUSR|S_IWUSR")
 #                      (eq (arg 1) "S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH"))))
 
@@ -45,7 +49,8 @@ fchmod: (eq (arg 1) "S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH")
 # create a new snapshot. If we do truncate it, we only want to be able to 
 # truncate to a length of zero.
 ftruncate: (and (or (eq (arg 0) tmp_fd) 
-                    (eq (arg 0) snapshot_fd)) 
+                    (eq (arg 0) full_snapshot_fd)
+                    (eq (arg 0) incremental_snapshot_fd)) 
                 (eq (arg 1) 0))
 
 # snapshot:
@@ -53,7 +58,8 @@ ftruncate: (and (or (eq (arg 0) tmp_fd)
 # The tar writer that the snapshot creation logic uses requires seek access 
 # in the two snapshot related files.
 lseek: (or (eq (arg 0) tmp_fd) 
-           (eq (arg 0) snapshot_fd)) 
+           (eq (arg 0) full_snapshot_fd)
+           (eq (arg 0) incremental_snapshot_fd))
 
 # snapshot
 #

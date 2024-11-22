@@ -255,6 +255,9 @@ typedef struct {
       int   vote;
       char  vote_account_path[ PATH_MAX ];
       ulong bank_tile_count;
+      ulong full_interval;
+      ulong incremental_interval;
+
     } replay;
 
     struct {
@@ -352,7 +355,8 @@ typedef struct {
       ulong incremental_interval;
       char  out_dir[ PATH_MAX ];
       int   tmp_fd;
-      int   snapshot_fd;
+      int   full_snapshot_fd;
+      int   incremental_snapshot_fd;
       ulong tpool_thread_count;
     } snaps;
 

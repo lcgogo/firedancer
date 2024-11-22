@@ -12,8 +12,8 @@
 
 #include "generated/snaps_seccomp.h"
 
-#define SCRATCH_MAX    (1024UL /*MiB*/ << 21)
-#define SCRATCH_DEPTH  (128UL) /* 128 scratch frames */
+#define SCRATCH_MAX    (1024UL /*MiB*/ << 24)
+#define SCRATCH_DEPTH  (256UL) /* 128 scratch frames */
 #define TPOOL_WORKER_MEM_SZ (1UL<<30UL) /* 256MB */
 
 
@@ -27,7 +27,8 @@ struct fd_snapshot_tile_ctx {
   ulong         * is_constipated;
 
   int             tmp_fd;
-  int             snapshot_fd;
+  int             full_snapshot_fd;
+  int             incremental_snapshot_fd;
 
   ulong           last_full_snap;
 
@@ -92,7 +93,13 @@ privileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   }
 
   char zstd_dir_buf[ FD_SNAPSHOT_DIR_MAX ];
-  err = snprintf( zstd_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/%s", tile->snaps.out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
+  err = snprintf( zstd_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/%s", tile->snaps.out_dir, FD_SNAPSHOT_TMP_FULL_ARCHIVE_ZSTD );
+  if( FD_UNLIKELY( err<0 ) ) {
+    FD_LOG_ERR(( "Failed to format directory string" ));
+  }
+
+  char zstd_inc_dir_buf[ FD_SNAPSHOT_DIR_MAX ];
+  err = snprintf( zstd_inc_dir_buf, FD_SNAPSHOT_DIR_MAX, "%s/%s", tile->snaps.out_dir, FD_SNAPSHOT_TMP_INCR_ARCHIVE_ZSTD );
   if( FD_UNLIKELY( err<0 ) ) {
     FD_LOG_ERR(( "Failed to format directory string" ));
   }
@@ -104,8 +111,13 @@ privileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
     FD_LOG_ERR(( "Failed to open and create tarball for file=%s (%i-%s)", tmp_dir_buf, errno, fd_io_strerror( errno ) ));
   }
 
-  tile->snaps.snapshot_fd = open( zstd_dir_buf, O_RDWR | O_CREAT | O_TRUNC, 0644 );
-  if( FD_UNLIKELY( tile->snaps.snapshot_fd==-1 ) ) {
+  tile->snaps.full_snapshot_fd = open( zstd_dir_buf, O_RDWR | O_CREAT | O_TRUNC, 0644 );
+  if( FD_UNLIKELY( tile->snaps.full_snapshot_fd==-1 ) ) {
+    FD_LOG_WARNING(( "Failed to open the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
+  }
+
+  tile->snaps.incremental_snapshot_fd = open( zstd_inc_dir_buf, O_RDWR | O_CREAT | O_TRUNC, 0644 );
+  if( FD_UNLIKELY( tile->snaps.incremental_snapshot_fd==-1 ) ) {
     FD_LOG_WARNING(( "Failed to open the snapshot file (%i-%s)", errno, fd_io_strerror( errno ) ));
   }
 
@@ -133,11 +145,12 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   void * scratch_fmem        = FD_SCRATCH_ALLOC_APPEND( l, fd_scratch_fmem_align(), fd_scratch_fmem_footprint( SCRATCH_DEPTH ) );
   ulong  scratch_alloc_mem   = FD_SCRATCH_ALLOC_FINI  ( l, scratch_align() );
 
-  ctx->full_interval        = tile->snaps.full_interval;
-  ctx->incremental_interval = tile->snaps.incremental_interval;
-  ctx->out_dir              = tile->snaps.out_dir;
-  ctx->tmp_fd               = tile->snaps.tmp_fd;
-  ctx->snapshot_fd          = tile->snaps.snapshot_fd;
+  ctx->full_interval           = tile->snaps.full_interval;
+  ctx->incremental_interval    = tile->snaps.incremental_interval;
+  ctx->out_dir                 = tile->snaps.out_dir;
+  ctx->tmp_fd                  = tile->snaps.tmp_fd;
+  ctx->full_snapshot_fd        = tile->snaps.full_snapshot_fd;
+  ctx->incremental_snapshot_fd = tile->snaps.incremental_snapshot_fd;
 
   /**********************************************************************/
   /* tpool                                                              */
@@ -157,10 +170,6 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
         FD_LOG_ERR(( "failed to launch worker" ));
       }
     }
-  }
-
-  if( ctx->tpool == NULL ) {
-    FD_LOG_ERR(("failed to create thread pool"));
   }
 
   /**********************************************************************/
@@ -248,17 +257,22 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
       .acc_mgr        = fd_acc_mgr_new( mem, ctx->funk ),
       .status_cache   = ctx->status_cache,
       .tmp_fd         = ctx->tmp_fd,
-      .snapshot_fd    = ctx->snapshot_fd,
+      .snapshot_fd    = is_incremental ? ctx->incremental_snapshot_fd : ctx->full_snapshot_fd,
       .tpool          = ctx->tpool,
+      .last_snap_slot = is_incremental ? ctx->last_full_snap : 0UL,
 
     };
+
+    if( !is_incremental ) {
+      ctx->last_full_snap = snapshot_slot;
+    }
 
     /* If this isn't the first snapshot that this tile is creating, the
        permissions should be made to not acessible by users and should be
        renamed to the constant file that is expected. */
 
     char prev_filename[ FD_SNAPSHOT_DIR_MAX ];
-    snprintf( prev_filename, FD_SNAPSHOT_DIR_MAX, "/proc/self/fd/%d", ctx->snapshot_fd );
+    snprintf( prev_filename, FD_SNAPSHOT_DIR_MAX, "/proc/self/fd/%d", is_incremental ? ctx->incremental_snapshot_fd : ctx->full_snapshot_fd );
     long len = readlink( prev_filename, prev_filename, FD_SNAPSHOT_DIR_MAX );
     if( FD_UNLIKELY( len==-1L ) ) {
       FD_LOG_ERR(( "Failed to readlink the snapshot file" ));
@@ -266,7 +280,8 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
     prev_filename[ len ] = '\0';
 
     char new_filename[ FD_SNAPSHOT_DIR_MAX ];
-    snprintf( new_filename, FD_SNAPSHOT_DIR_MAX, "%s/%s", ctx->out_dir, FD_SNAPSHOT_TMP_ARCHIVE_ZSTD );
+    snprintf( new_filename, FD_SNAPSHOT_DIR_MAX, "%s/%s", ctx->out_dir, is_incremental ? FD_SNAPSHOT_TMP_INCR_ARCHIVE_ZSTD : FD_SNAPSHOT_TMP_FULL_ARCHIVE_ZSTD );
+
 
     rename( prev_filename, new_filename );
 
@@ -291,7 +306,7 @@ populate_allowed_seccomp( fd_topo_t const *      topo,
 
   FD_LOG_WARNING(("DONE HERE 4"));
 
-  populate_sock_filter_policy_snaps( out_cnt, out, (uint)fd_log_private_logfile_fd(), (uint)tile->snaps.tmp_fd, (uint)tile->snaps.snapshot_fd );
+  populate_sock_filter_policy_snaps( out_cnt, out, (uint)fd_log_private_logfile_fd(), (uint)tile->snaps.tmp_fd, (uint)tile->snaps.full_snapshot_fd, (uint)tile->snaps.incremental_snapshot_fd );
   return sock_filter_policy_snaps_instr_cnt;
 }
 
@@ -315,7 +330,8 @@ populate_allowed_fds( fd_topo_t const *      topo,
     out_fds[ out_cnt++ ] = fd_log_private_logfile_fd(); /* logfile */
 
   out_fds[ out_cnt++ ] = tile->snaps.tmp_fd;
-  out_fds[ out_cnt++ ] = tile->snaps.snapshot_fd;
+  out_fds[ out_cnt++ ] = tile->snaps.full_snapshot_fd;
+  out_fds[ out_cnt++ ] = tile->snaps.incremental_snapshot_fd;
   return out_cnt;
 }
 

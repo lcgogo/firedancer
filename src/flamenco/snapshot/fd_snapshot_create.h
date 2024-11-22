@@ -29,8 +29,10 @@
 #define FD_SNAPSHOT_VERSION_LEN       (5UL)
 #define FD_SNAPSHOT_STATUS_CACHE_FILE ("snapshots/status_cache")
 
-#define FD_SNAPSHOT_TMP_ARCHIVE       (".tmp.tar")
-#define FD_SNAPSHOT_TMP_ARCHIVE_ZSTD  (".tmp.tar.zst")
+#define FD_SNAPSHOT_TMP_ARCHIVE           (".tmp.tar")
+#define FD_SNAPSHOT_TMP_FULL_ARCHIVE_ZSTD (".tmp.tar.zst")
+#define FD_SNAPSHOT_TMP_INCR_ARCHIVE_ZSTD (".tmp2.tar.zst")
+
 
 #define FD_SNAPSHOT_APPEND_VEC_SZ_MAX (16UL * 1024UL * 1024UL * 1024UL)
 

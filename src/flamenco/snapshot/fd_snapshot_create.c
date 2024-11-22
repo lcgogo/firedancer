@@ -310,8 +310,9 @@ fd_snapshot_create_populate_acc_vecs( fd_snapshot_ctx_t                 * snapsh
   for( ulong i=0UL; i<snapshot_slot_key_cnt; i++ ) {
     
     fd_pubkey_t const * pubkey = snapshot_slot_keys[i];
+    fd_funk_rec_key_t key = fd_acc_funk_key( pubkey );
 
-    fd_funk_rec_t const * rec = fd_funk_rec_query( funk, NULL, (fd_funk_rec_key_t*)pubkey );
+    fd_funk_rec_t const * rec = fd_funk_rec_query( funk, NULL, &key );
     if( FD_UNLIKELY( !rec ) ) {
       FD_LOG_ERR(( "Previously found record can no longer be found" ));
     }

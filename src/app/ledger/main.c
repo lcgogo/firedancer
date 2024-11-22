@@ -311,7 +311,7 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
     fd_blockstore_start_read( blockstore );
     fd_block_t * blk = fd_blockstore_block_query( blockstore, slot );
     if( blk == NULL ) {
-      FD_LOG_WARNING( ( "failed to read slot %ld", slot ) );
+      FD_LOG_WARNING(( "failed to read slot %lu", slot ));
       /* TODO: This is currently a hack because ticks are not correctly
          computed or handled in the runtime. It is neceesary to update ticks
          for skipped slots for snapshot creation. */
@@ -329,7 +329,7 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
     /* TODO:FIXME: skipped slots handling */
 
 
-    FD_LOG_WARNING(("last snapshot slot %lu snapping %u freq met %u", ledger_args->last_snapshot_slot, ledger_args->is_snapshotting, ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL ));
+    FD_LOG_WARNING(("last snapshot slot %lu snapping %u freq met %d", ledger_args->last_snapshot_slot, ledger_args->is_snapshotting, ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL ));
 
     if( ledger_args->slot_ctx->root_slot%ledger_args->snapshot_freq==0UL && !ledger_args->is_snapshotting ) {
 

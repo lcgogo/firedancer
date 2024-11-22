@@ -329,7 +329,7 @@ runtime_replay( fd_ledger_args_t * ledger_args ) {
     /* TODO:FIXME: skipped slots handling */
 
 
-    FD_LOG_WARNING(("last snapshot slot %lu snapping %u freq met %d", ledger_args->last_snapshot_slot, ledger_args->is_snapshotting, ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL ));
+    //FD_LOG_WARNING(("last snapshot slot %lu snapping %u freq met %d", ledger_args->last_snapshot_slot, ledger_args->is_snapshotting, ledger_args->slot_ctx->root_slot%ledger_args->incremental_freq==0UL ));
 
     if( ledger_args->slot_ctx->root_slot%ledger_args->snapshot_freq==0UL && !ledger_args->is_snapshotting ) {
 

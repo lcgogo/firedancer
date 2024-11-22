@@ -242,6 +242,10 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
     if( !is_incremental ) {
       ctx->last_full_snap = snapshot_slot;
     }
+
+    if( ctx->last_full_snap != 0UL && !is_incremental ) {
+      FD_LOG_ERR(("SUCCESSUFL EXIT"));
+    }
     
     FD_LOG_WARNING(("CREATING SNAPSHOT %lu %lu", is_incremental, snapshot_slot));
 
@@ -273,7 +277,8 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
 
     char prev_filename[ FD_SNAPSHOT_DIR_MAX ];
     snprintf( prev_filename, FD_SNAPSHOT_DIR_MAX, "/proc/self/fd/%d", is_incremental ? ctx->incremental_snapshot_fd : ctx->full_snapshot_fd );
-    long len = readlink( prev_filename, prev_filename, FD_SNAPSHOT_DIR_MAX );
+    char temp_filename[FD_SNAPSHOT_DIR_MAX]; // Temporary buffer for the path
+    long len = readlink(prev_filename, temp_filename, FD_SNAPSHOT_DIR_MAX);
     if( FD_UNLIKELY( len==-1L ) ) {
       FD_LOG_ERR(( "Failed to readlink the snapshot file" ));
     }

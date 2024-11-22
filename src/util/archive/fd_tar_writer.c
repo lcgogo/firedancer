@@ -294,7 +294,7 @@ fd_tar_writer_fill_space( fd_tar_writer_t * writer, void const * data, ulong dat
   long eof_pos = lseek( writer->fd, 0, SEEK_END );
   long seek    = lseek( writer->fd, (long)writer->wb_pos, SEEK_SET );
   if( FD_UNLIKELY( (ulong)seek!=writer->wb_pos ) ) {
-    FD_LOG_WARNING(( "Failed to seek to the write back position (%lu %lu)", seek, writer->wb_pos ));
+    FD_LOG_WARNING(( "Failed to seek to the write back position (%ld %lu)", seek, writer->wb_pos ));
     return -1;
   }
 
@@ -316,7 +316,7 @@ fd_tar_writer_fill_space( fd_tar_writer_t * writer, void const * data, ulong dat
 
   seek = lseek( writer->fd, 0, SEEK_END );
   if( FD_UNLIKELY( seek!=eof_pos ) ) {
-    FD_LOG_WARNING(( "Failed to seek to the end of the file (%lu)", seek ));
+    FD_LOG_WARNING(( "Failed to seek to the end of the file (%ld)", seek ));
     return -1;
   }
 

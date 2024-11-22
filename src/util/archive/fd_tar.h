@@ -92,7 +92,7 @@ fd_tar_set_octal( char  buf[ static 12 ],
 static inline int
 fd_tar_meta_set_size( fd_tar_meta_t * meta,
                       ulong           sz ) {
-  meta->size[ 0 ] = 0x80;
+  meta->size[ 0 ] = (char)0x80;
   FD_STORE( ulong, meta->size + 4UL, fd_ulong_bswap( sz ) );
   return 1;
 }

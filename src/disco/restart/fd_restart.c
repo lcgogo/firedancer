@@ -39,7 +39,9 @@ fd_restart_join( void * restart ) {
 
 void
 fd_restart_init( fd_restart_t * restart,
-                 fd_vote_accounts_t const * accs,
+                 ulong root_epoch,
+                 fd_vote_accounts_t const * vote_acct_current_epoch,
+                 fd_vote_accounts_t const * vote_acct_next_epoch,
                  fd_tower_t const * tower,
                  fd_slot_history_t const * slot_history,
                  fd_funk_t * funk,
@@ -48,32 +50,50 @@ fd_restart_init( fd_restart_t * restart,
                  fd_pubkey_t * coordinator_pubkey,
                  uchar * out_buf,
                  ulong * out_buf_len ) {
-  restart->num_vote_accts     = fd_stake_weights_by_node( accs, restart->stake_weights );
-  restart->total_stake        = 0;
-  restart->total_active_stake = 0;
-  restart->tower_root         = tower->root;
-  restart->funk_root          = fd_funk_last_publish( funk )->ul[0];
-  FD_TEST( restart->num_vote_accts <= MAX_RESTART_PEERS );
-  FD_LOG_WARNING(( "fd_restart_init: funk root=%lu, tower root=%lu", restart->funk_root, restart->tower_root ));
+  /* Save the vote account information of the **current** epoch */
+  if( vote_acct_current_epoch->vote_accounts_root==NULL ) FD_LOG_ERR(( "vote account information for epoch#%lu is missing", root_epoch ));
+  restart->num_vote_accts[0]                 = fd_stake_weights_by_node( vote_acct_current_epoch, restart->stake_weights[0] );
+  restart->total_stake[0]                    = 0;
+  restart->total_stake_received[0]           = 0;
+  restart->total_stake_received_and_voted[0] = 0;
 
-  FD_LOG_NOTICE(( "%lu staked voters", restart->num_vote_accts ));
-  for( ulong i=0; i<restart->num_vote_accts; i++ ) {
-    FD_LOG_NOTICE(( "fd_restart_init: %s holds stake amount=%lu",
-                    FD_BASE58_ENC_32_ALLOCA( &restart->stake_weights[i].key ),
-                    restart->stake_weights[i].stake ));
-    restart->total_stake += restart->stake_weights[i].stake;
+  FD_LOG_NOTICE(( "%lu staked voters in the current epoch", restart->num_vote_accts[0] ));
+  for( ulong i=0; i<restart->num_vote_accts[0]; i++ ) {
+    FD_LOG_NOTICE(( "fd_restart_init: %s holds stake amount=%lu in epoch#%lu",
+                    FD_BASE58_ENC_32_ALLOCA( &restart->stake_weights[0][i].key ),
+                    restart->stake_weights[0][i].stake, root_epoch ));
+    restart->total_stake[0] += restart->stake_weights[0][i].stake;
   }
 
-  fd_gossip_restart_last_voted_fork_slots_t * msg = (fd_gossip_restart_last_voted_fork_slots_t *) fd_type_pun( out_buf );
+  /* Save the vote account information of the **next** epoch */
+  if( vote_acct_next_epoch->vote_accounts_root==NULL ) FD_LOG_ERR(( "vote account information for epoch#%lu is missing", root_epoch+1 ));
+  restart->num_vote_accts[1]                 = fd_stake_weights_by_node( vote_acct_next_epoch, restart->stake_weights[1] );
+  restart->total_stake[1]                    = 0;
+  restart->total_stake_received[1]           = 0;
+  restart->total_stake_received_and_voted[1] = 0;
+
+  FD_LOG_NOTICE(( "%lu staked voters in the next epoch", restart->num_vote_accts[1] ));
+  for( ulong i=0; i<restart->num_vote_accts[1]; i++ ) {
+    FD_LOG_NOTICE(( "fd_restart_init: %s holds stake amount=%lu in epoch#%lu",
+                    FD_BASE58_ENC_32_ALLOCA( &restart->stake_weights[1][i].key ),
+                    restart->stake_weights[1][i].stake, root_epoch+1 ));
+    restart->total_stake[1] += restart->stake_weights[1][i].stake;
+  }
+
+  /* Decide the last voted slot for the last_voted_fork_slots gossip message being sent out */
+  /* TODO: dump the right tower to use when terminating FD and reload the right tower */
   /* FIXME: Need to check whether this tower loaded from the funk checkpoint is the right one to use; It seems stale. */
   if( fd_tower_votes_cnt( tower->votes ) == 0 ) {
     FD_LOG_ERR(( "The tower loaded has 0 votes and wen-restart cannot proceed without an appropriate tower" ));
   }
+  fd_gossip_restart_last_voted_fork_slots_t * msg = (fd_gossip_restart_last_voted_fork_slots_t *) fd_type_pun( out_buf );
   msg->last_voted_slot = fd_tower_votes_peek_tail_const( tower->votes )->slot;
   if( FD_UNLIKELY( msg->last_voted_slot>=slot_history->next_slot ) ) {
     FD_LOG_ERR(( "Voted slot should not exceed the end of slot history" ));
   }
 
+  /* Given last_voted_slot, get the block hash for the last_voted_fork_slots gossip message */
+  /* TODO: should this be block hash or bank hash? */
   fd_blockstore_start_read( blockstore );
   fd_hash_t const * vote_block_hash = fd_blockstore_block_hash_query( blockstore, msg->last_voted_slot );
   fd_blockstore_end_read( blockstore );
@@ -84,14 +104,15 @@ fd_restart_init( fd_restart_t * restart,
     fd_memcpy( msg->last_voted_hash.hash, vote_block_hash->hash, sizeof(fd_hash_t) );
   }
 
+  /* Given last_voted_slot, get the slot history bitmap for the last_voted_fork_slots gossip message */
   ulong end_slot   = msg->last_voted_slot;
   ulong start_slot = ( end_slot>LAST_VOTED_FORK_MAX_SLOTS? end_slot-LAST_VOTED_FORK_MAX_SLOTS : 0 );
   ulong num_slots  = end_slot-start_slot+1;
   msg->offsets.discriminant                            = fd_restart_slots_offsets_enum_raw_offsets;
   msg->offsets.inner.raw_offsets.offsets.has_bits      = 1;
   msg->offsets.inner.raw_offsets.offsets.len           = num_slots;
-  msg->offsets.inner.raw_offsets.offsets.bits.bits_len = ( num_slots+bits_per_uchar )/bits_per_uchar;
-  *out_buf_len = sizeof(fd_gossip_restart_last_voted_fork_slots_t) + ( num_slots+bits_per_uchar )/bits_per_uchar;
+  msg->offsets.inner.raw_offsets.offsets.bits.bits_len = ( num_slots-1 )/bits_per_uchar+1;
+  *out_buf_len = sizeof(fd_gossip_restart_last_voted_fork_slots_t) + ( num_slots-1 )/bits_per_uchar+1;
   FD_LOG_NOTICE(( "fd_restart_init: encoding %lu bits in bitmap", num_slots ));
 
   uchar * bitmap = out_buf + sizeof(fd_gossip_restart_last_voted_fork_slots_t);
@@ -111,6 +132,13 @@ fd_restart_init( fd_restart_t * restart,
       bitmap[ out_idx ] = fd_uchar_clear_bit( bitmap[ out_idx ], out_bit_off );
     }
   }
+
+  /* Initialize the other fields of fd_restart_t */
+  restart->root_epoch                      = root_epoch;
+  restart->tower_root                      = tower->root;
+  restart->funk_root                       = fd_funk_last_publish( funk )->ul[0];
+  FD_TEST( restart->num_vote_accts[0] <= MAX_RESTART_PEERS );
+  FD_LOG_WARNING(( "fd_restart_init: funk root=%lu, tower root=%lu", restart->funk_root, restart->tower_root ));
 
   restart->stage                           = WR_STAGE_FIND_HEAVIEST_FORK_SLOT_NUM;
   restart->heaviest_fork_slot              = 0;
@@ -135,35 +163,39 @@ fd_restart_recv_last_voted_fork_slots( fd_restart_t * restart,
     return;
   }
 
-  ulong stake          = ULONG_MAX;
+  /* Find the message sender from restart->stake_weights */
   fd_pubkey_t * pubkey = &msg->from;
-  for( ulong i=0; i<restart->num_vote_accts; i++ ) {
-    if( FD_UNLIKELY( memcmp( pubkey->key, restart->stake_weights[i].key.key, sizeof(fd_pubkey_t) )==0 ) ) {
-      if( FD_UNLIKELY( restart->last_voted_fork_slots_received[i] ) ) {
-        FD_LOG_NOTICE(( "Duplicate last_voted_fork_slots message from %s", FD_BASE58_ENC_32_ALLOCA( pubkey ) ));
-        return;
+  ulong stake_received[MAX_EPOCHS] = {0UL, 0UL};
+
+  for( ulong e=0; e<MAX_EPOCHS; e++ ) {
+    for( ulong i=0; i<restart->num_vote_accts[e]; i++ ) {
+      if( FD_UNLIKELY( memcmp( pubkey->key, restart->stake_weights[e][i].key.key, sizeof(fd_pubkey_t) )==0 ) ) {
+        if( FD_UNLIKELY( restart->last_voted_fork_slots_received[e][i] ) ) {
+          FD_LOG_NOTICE(( "Duplicate last_voted_fork_slots message from %s", FD_BASE58_ENC_32_ALLOCA( pubkey ) ));
+          return;
+        }
+        stake_received[e] = restart->stake_weights[e][i].stake;
+        restart->last_voted_fork_slots_received[e][i] = 1;
+        break;
       }
-      stake = restart->stake_weights[i].stake;
-      restart->last_voted_fork_slots_received[i] = 1;
-      break;
     }
+    restart->total_stake_received[e] += stake_received[e];
   }
-  if( FD_UNLIKELY( stake==ULONG_MAX ) ) {
+
+  if( FD_UNLIKELY( stake_received[0]==0 && stake_received[1]==0 ) ) {
     FD_LOG_WARNING(( "Get last_voted_fork_slots message from unknown validator: %s", FD_BASE58_ENC_32_ALLOCA( pubkey ) ));
     return;
   }
 
-  restart->total_active_stake += stake;
-  ulong percentile = restart->total_active_stake * 100 / restart->total_stake;
+  ulong percentile = restart->total_stake_received[0] * 100 / restart->total_stake[0];
   FD_LOG_NOTICE(( "Total active stake: %lu/%lu = %lu%\n",
-                  restart->total_active_stake,
-                  restart->total_stake,
+                  restart->total_stake_received[0],
+                  restart->total_stake[0],
                   percentile));
 
-  if( FD_UNLIKELY( msg->offsets.discriminant==fd_restart_slots_offsets_enum_run_length_encoding ) ) {
-    FD_LOG_ERR(( "Decoding RunLengthEncoding offsets is not implemented yet" ));
-  }
-
+  /* TODO: take care of both epochs, which requires the 33% threshold */
+  FD_LOG_WARNING(( "last_voted_slot=%lu, offsets_len=%lu", msg->last_voted_slot, msg->offsets.inner.raw_offsets.offsets.len ));
+  /* Decode the slot history bitmap in the gossip message, and aggregate stake into slot_to_stake accordingly */
   for( ulong i=0, last_voted_slot = msg->last_voted_slot; \
        i<msg->offsets.inner.raw_offsets.offsets.len; i++ ) {
     if( FD_UNLIKELY( last_voted_slot<restart->tower_root+i ) ) break;
@@ -174,13 +206,14 @@ fd_restart_recv_last_voted_fork_slots( fd_restart_t * restart,
     uchar bit      = msg->offsets.inner.raw_offsets.offsets.bits.bits[ byte_off ] & (uchar)(1<<bit_off);
     if( FD_LIKELY( bit ) ) {
       ulong offset = slot-restart->tower_root;
-      restart->slot_to_stake[ offset ] += stake;
+      restart->slot_to_stake[ offset ] += stake_received[0];
+      /* TODO: repair slots >=stake_threshold along the way instead of waiting till the end? */
     }
   }
 
   if( FD_UNLIKELY( percentile>=WAIT_FOR_SUPERMAJORITY_THRESHOLD_PERCENT ) ) {
-    ulong stake_threshold = restart->total_active_stake
-                            - restart->total_stake * HEAVIEST_FORK_THRESHOLD_DELTA_PERCENT / 100UL;
+    ulong stake_threshold = restart->total_stake_received[0]
+                            - restart->total_stake[0] * HEAVIEST_FORK_THRESHOLD_DELTA_PERCENT / 100UL;
 
     FD_LOG_NOTICE(( "Stake threshold: %lu", stake_threshold ));
     restart->heaviest_fork_slot = restart->tower_root;
@@ -194,6 +227,8 @@ fd_restart_recv_last_voted_fork_slots( fd_restart_t * restart,
       FD_LOG_ERR(( "Funk root(%lu) is higher than the heaviest fork slot(%lu)",
                    restart->funk_root, restart->heaviest_fork_slot ));
     }
+    /* TODO: verify that all slots >=stake_threshold form a single chain in blockstore and contain the funk root */
+    /* But, at this point, maybe there are still slots need to be repaired? */
 
     *out_heaviest_fork_found = 1;
     restart->stage           = WR_STAGE_FIND_HEAVIEST_FORK_BANK_HASH;
@@ -213,7 +248,7 @@ fd_restart_recv_heaviest_fork( fd_restart_t * restart,
                sizeof(fd_hash_t) );
     restart->coordinator_heaviest_fork_ready = 1;
   } else {
-    FD_LOG_WARNING(( "Received a restart_heaviest_fork message from non-coordinator %s",
+    FD_LOG_WARNING(( "Received and ignored a restart_heaviest_fork message from non-coordinator %s",
                      FD_BASE58_ENC_32_ALLOCA( &msg->from ) ));
   }
 }
@@ -266,6 +301,7 @@ fd_restart_find_heaviest_fork_bank_hash( fd_restart_t * restart,
     *out_need_repair = 1;
   }
 
+  /* TODO: if we do the repair along the way, we cannot do this cleanup below... */
   /* Cancel txns after the funk root from funk */
   fd_funk_start_write( funk );
   for( ulong slot=restart->funk_root+1; slot<=restart->heaviest_fork_slot; slot++ ) {
@@ -303,8 +339,9 @@ fd_restart_verify_heaviest_fork( fd_restart_t * restart,
     if( FD_UNLIKELY( memcmp( restart->my_pubkey.key,
                              restart->coordinator_pubkey.key,
                              sizeof(fd_pubkey_t) )==0 ) ) {
-      // I am the wen-restart coordinator
+      /* I am the wen-restart coordinator */
       if( FD_UNLIKELY( !restart->coordinator_heaviest_fork_sent ) ) {
+        /* TODO: send this message periodically? */
         restart->coordinator_heaviest_fork_sent = 1;
         fd_gossip_restart_heaviest_fork_t * msg = (fd_gossip_restart_heaviest_fork_t *) fd_type_pun( out_buf );
         msg->observed_stake = 0;
@@ -313,7 +350,7 @@ fd_restart_verify_heaviest_fork( fd_restart_t * restart,
         *out_send = 1;
       }
     } else if( FD_UNLIKELY( restart->coordinator_heaviest_fork_ready==1 ) ) {
-      // I am not the wen-restart coordinator
+      /* I am not the wen-restart coordinator */
       if( restart->heaviest_fork_slot!=restart->coordinator_heaviest_fork_slot ) {
         FD_LOG_ERR(( "Heaviest fork mismatch: my slot=%lu, coordinator slot=%lu",
                      restart->heaviest_fork_slot, restart->coordinator_heaviest_fork_slot ));
@@ -326,10 +363,38 @@ fd_restart_verify_heaviest_fork( fd_restart_t * restart,
                      FD_BASE58_ENC_32_ALLOCA( &restart->heaviest_fork_bank_hash ),
                      FD_BASE58_ENC_32_ALLOCA( &restart->coordinator_heaviest_fork_bank_hash ) ));
       }
-      /* TODO: generate an incremental snapshot */
+      /* TODO: insert a hard fork and generate an incremental snapshot */
       restart->stage = WR_STAGE_GENERATE_SNAPSHOT;
       FD_LOG_ERR(( "Wen-restart succeeds with slot=%lu, bank hash=%s",
                    restart->heaviest_fork_slot, FD_BASE58_ENC_32_ALLOCA( &restart->heaviest_fork_bank_hash ) ));
     }
   }
 }
+
+void
+fd_restart_convert_runlength_to_raw_bitmap( fd_gossip_restart_last_voted_fork_slots_t * msg,
+                                            uchar * out_bitmap,
+                                            ulong * out_bitmap_len ) {
+  ulong bit_cnt   = 0;
+  *out_bitmap_len = 0;
+  fd_memset( out_bitmap, 0, LAST_VOTED_FORK_MAX_BITMAP_BYTES );
+
+  for ( ulong i=0, bit=1; i<msg->offsets.inner.run_length_encoding.offsets_len; i++ ) {
+    ushort cnt = msg->offsets.inner.run_length_encoding.offsets[i].bits;
+    if( FD_UNLIKELY( *out_bitmap_len > LAST_VOTED_FORK_MAX_BITMAP_BYTES ) ) return;
+    if( bit ) {
+      for ( ulong pos=bit_cnt; pos<bit_cnt+cnt; pos++ ) {
+        out_bitmap[ pos/bits_per_uchar ] = fd_uchar_set_bit( out_bitmap[ pos/bits_per_uchar ], pos%bits_per_uchar );
+      }
+    }
+    bit_cnt        += cnt;
+    *out_bitmap_len = (bit_cnt - 1) / bits_per_uchar + 1;
+    bit            ^= 1;
+  }
+  msg->offsets.discriminant = fd_restart_slots_offsets_enum_raw_offsets;
+  msg->offsets.inner.raw_offsets.offsets.has_bits      = 1;
+  msg->offsets.inner.raw_offsets.offsets.len           = bit_cnt;
+  msg->offsets.inner.raw_offsets.offsets.bits.bits_len = *out_bitmap_len;
+}
+
+/* TODO: the coordinator needs to aggregate HeaviestFork messages, just for the information */

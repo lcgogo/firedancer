@@ -470,7 +470,11 @@ during_frag( fd_replay_tile_ctx_t * ctx,
       FD_LOG_ERR(( "chunk %lu %lu corrupt, not in range [%lu,%lu]", chunk, sz, ctx->pack_in_chunk0, ctx->pack_in_wmark ));
     }
 
-    fd_memcpy( ctx->restart_gossip_msg, fd_chunk_to_laddr( ctx->gossip_in_mem, chunk ), sz );
+    if( FD_LIKELY( ctx->in_wen_restart ) ) {
+      fd_memcpy( ctx->restart_gossip_msg, fd_chunk_to_laddr( ctx->gossip_in_mem, chunk ), sz );
+    } else {
+      FD_LOG_WARNING(( "Received a gossip message for wen-restart while FD is not in wen-restart mode" ));
+    }
     return;
   }
 
@@ -893,23 +897,21 @@ after_frag( fd_replay_tile_ctx_t * ctx,
   (void)tsorig;
 
   if( FD_UNLIKELY( in_idx==GOSSIP_IN_IDX ) ) {
-    if( FD_UNLIKELY( !ctx->in_wen_restart ) ) {
-      FD_LOG_WARNING(( "Received gossip messages for wen-restart while FD is not in wen-restart mode" ));
-    } else {
-      ulong heaviest_fork_found = 0;
-      fd_restart_recv_gossip_msg( ctx->restart, ctx->restart_gossip_msg, &heaviest_fork_found );
-      if( FD_UNLIKELY( heaviest_fork_found ) ) {
-        ulong need_repair = 0;
-        fd_restart_find_heaviest_fork_bank_hash( ctx->restart, ctx->funk, ctx->blockstore, &need_repair );
-        if( FD_LIKELY( need_repair ) ) {
-          /* Send the heaviest fork slot to the store tile for repair and replay */
-          uchar * buf = fd_chunk_to_laddr( ctx->store_out_mem, ctx->store_out_chunk );
-          FD_STORE( ulong, buf, ctx->restart->heaviest_fork_slot );
-          fd_mcache_publish( ctx->store_out_mcache, ctx->store_out_depth, ctx->store_out_seq, 1UL, ctx->store_out_chunk,
-                             sizeof(ulong), 0UL, 0, 0 );
-          ctx->store_out_seq   = fd_seq_inc( ctx->store_out_seq, 1UL );
-          ctx->store_out_chunk = fd_dcache_compact_next( ctx->store_out_chunk, sizeof(ulong), ctx->store_out_chunk0, ctx->store_out_wmark );
-        }
+    if( FD_UNLIKELY( !ctx->in_wen_restart ) ) return;
+
+    ulong heaviest_fork_found = 0;
+    fd_restart_recv_gossip_msg( ctx->restart, ctx->restart_gossip_msg, &heaviest_fork_found );
+    if( FD_UNLIKELY( heaviest_fork_found ) ) {
+      ulong need_repair = 0;
+      fd_restart_find_heaviest_fork_bank_hash( ctx->restart, ctx->funk, ctx->blockstore, &need_repair );
+      if( FD_LIKELY( need_repair ) ) {
+        /* Send the heaviest fork slot to the store tile for repair and replay */
+        uchar * buf = fd_chunk_to_laddr( ctx->store_out_mem, ctx->store_out_chunk );
+        FD_STORE( ulong, buf, ctx->restart->heaviest_fork_slot );
+        fd_mcache_publish( ctx->store_out_mcache, ctx->store_out_depth, ctx->store_out_seq, 1UL, ctx->store_out_chunk,
+                           sizeof(ulong), 0UL, 0, 0 );
+        ctx->store_out_seq   = fd_seq_inc( ctx->store_out_seq, 1UL );
+        ctx->store_out_chunk = fd_dcache_compact_next( ctx->store_out_chunk, sizeof(ulong), ctx->store_out_chunk0, ctx->store_out_wmark );
       }
     }
     return;
@@ -1467,8 +1469,21 @@ after_credit( fd_replay_tile_ctx_t * ctx,
           ulong buf_len = 0;
           uchar * buf = fd_chunk_to_laddr( ctx->gossip_out_mem, ctx->gossip_out_chunk );
           fd_sysvar_slot_history_read( ctx->slot_ctx, fd_scratch_virtual(), ctx->slot_ctx->slot_history );
+
+          fd_epoch_bank_t * epoch_bank = fd_exec_epoch_ctx_epoch_bank( ctx->slot_ctx->epoch_ctx );
+          fd_stakes_t * stakes = &epoch_bank->stakes;
+          /* FIXME: Restoring funk checkpoint does not give the correct epoch number,
+           *        i.e., the epoch number when the funk checkpoint file is produced.
+           *        For now, we need to redo stakes->epoch in order to avoid a BHM in
+           *        a local setup when repairing blocks. */
+          stakes->epoch = ctx->blockstore->smr / epoch_bank->epoch_schedule.slots_per_epoch;
+          FD_LOG_NOTICE(( "slots_per_epoch=%lu, blockstore smr=%lu", epoch_bank->epoch_schedule.slots_per_epoch, ctx->blockstore->smr ));
+          FD_LOG_WARNING(( "Reset stakes->epoch=%lu (blockstore root / slots per epoch)", stakes->epoch ));
+
           fd_restart_init( ctx->restart,
+                           stakes->epoch,
                            &ctx->slot_ctx->slot_bank.epoch_stakes,
+                           &epoch_bank->next_epoch_stakes,
                            ctx->tower,
                            ctx->slot_ctx->slot_history,
                            ctx->funk,
@@ -1485,17 +1500,6 @@ after_credit( fd_replay_tile_ctx_t * ctx,
                              buf_len, 0UL, 0, 0 );
           ctx->gossip_out_seq   = fd_seq_inc( ctx->gossip_out_seq, 1UL );
           ctx->gossip_out_chunk = fd_dcache_compact_next( ctx->gossip_out_chunk, buf_len, ctx->gossip_out_chunk0, ctx->gossip_out_wmark );
-
-          /* FIXME: Restoring funk checkpoint does not give the correct epoch number,
-           *        i.e., the epoch number when the funk checkpoint file is produced.
-           *        For now, we need to redo stakes->epoch in order to avoid a BHM in
-           *        a local setup when repairing blocks. */
-          fd_epoch_bank_t * epoch_bank = fd_exec_epoch_ctx_epoch_bank( ctx->slot_ctx->epoch_ctx );
-          fd_stakes_t * stakes = &epoch_bank->stakes;
-          stakes->epoch = ctx->blockstore->smr / epoch_bank->epoch_schedule.slots_per_epoch;
-          FD_LOG_NOTICE(( "slots_per_epoch=%lu, blockstore root=%lu", epoch_bank->epoch_schedule.slots_per_epoch, ctx->blockstore->smr ));
-          FD_LOG_WARNING(( "Reset stakes->epoch=%lu (blockstore root / slots per epoch)", stakes->epoch ));
-
         } FD_SCRATCH_SCOPE_END;
       }
     }
@@ -1549,6 +1553,7 @@ during_housekeeping( void * _ctx ) {
     fd_ghost_publish( ctx->ghost, smr );
   }
 
+  /* TODO: generate snapshot file instead of checkpointing funk; dump the latest tower sent */
   /* FIXME: Decide how to tell FD to checkpoint funk and then halt before restarting FD in wen-restart mode */
   if( ctx->in_wen_restart && ctx->curr_slot>ctx->snapshot_slot+250 ) {
     checkpt( ctx );

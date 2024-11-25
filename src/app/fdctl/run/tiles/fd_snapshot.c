@@ -9,6 +9,7 @@
 #include "../../../../flamenco/runtime/fd_txncache.h"
 #include "../../../../flamenco/runtime/fd_runtime.h"
 #include "../../../../flamenco/snapshot/fd_snapshot_create.h"
+#include "../../../../funk/fd_funk_filemap.h"
 
 #include "generated/snaps_seccomp.h"
 
@@ -34,6 +35,8 @@ struct fd_snapshot_tile_ctx {
 
   uchar           tpool_mem[FD_TPOOL_FOOTPRINT( FD_TILE_MAX )] __attribute__( ( aligned( FD_TPOOL_ALIGN ) ) );
   fd_tpool_t *    tpool;
+
+  int activated;
 };
 typedef struct fd_snapshot_tile_ctx fd_snapshot_tile_ctx_t;
 
@@ -176,12 +179,31 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   /* funk                                                               */
   /**********************************************************************/
 
-  ulong funk_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "funk" );
-  FD_TEST( funk_obj_id!=ULONG_MAX );
-  ctx->funk = fd_funk_join( fd_topo_obj_laddr( topo, funk_obj_id ) );
-  if( ctx->funk==NULL ) {
-    FD_LOG_ERR(( "no funk" ));
-  }
+  // ulong funk_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "funk" );
+  // FD_TEST( funk_obj_id!=ULONG_MAX );
+  // ctx->funk = fd_funk_join( fd_topo_obj_laddr( topo, funk_obj_id ) );
+  // if( ctx->funk==NULL ) {
+  //   FD_LOG_ERR(( "no funk" ));
+  // }
+
+  ctx->activated = 0;
+
+  /* TODO: This below code needs to be shared as a topology object. */
+  // fd_funk_t * funk;
+
+  // FD_LOG_WARNING(("STARTING TO JOIN FUNK"));
+
+  //   /* Create new funk database */
+  // funk = fd_funk_open_file(
+  //     "/data/ibhatt/funkfile", 1, 0UL, 0UL,
+  //     0UL, 0UL,
+  //     FD_FUNK_READONLY, NULL );
+  // if( funk == NULL ) {
+  //   FD_LOG_ERR(( "no funk loaded" ));
+  // }
+
+  // FD_LOG_WARNING(("JOINED FUNK"));
+  // ctx->funk = funk;
 
   /**********************************************************************/
   /* status cache                                                       */
@@ -190,8 +212,8 @@ unprivileged_init( fd_topo_t      * topo FD_PARAM_UNUSED,
   ulong status_cache_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "txncache" );
   FD_TEST( status_cache_obj_id!=ULONG_MAX );
   ctx->status_cache = fd_txncache_join( fd_topo_obj_laddr( topo, status_cache_obj_id ) );
-  if( ctx->funk==NULL ) {
-    FD_LOG_ERR(( "no funk" ));
+  if( ctx->status_cache==NULL ) {
+    FD_LOG_ERR(( "no status cache" ));
   }
 
   /**********************************************************************/
@@ -232,26 +254,37 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
               int *                    opt_poll_in FD_PARAM_UNUSED,
               int *                    charge_busy FD_PARAM_UNUSED ) {
     
+
+
   ulong is_constipated = fd_fseq_query( ctx->is_constipated );
 
   if( FD_UNLIKELY( is_constipated ) ) {
 
+    if( FD_UNLIKELY( !ctx->activated ) ) {
+      ctx->funk = fd_funk_open_file(
+        "/data/ibhatt/funkfile", 1, 0, 0, 0, 0, FD_FUNK_READ_WRITE, NULL );
+      if( ctx->funk == NULL ) {
+        FD_LOG_ERR(( "failed to join a funky" ));
+      }
+      ctx->activated = 1;
+
+      FD_LOG_WARNING(("JUST JOINED SNAPSHOT FUNK"));
+    }
+
     ulong is_incremental = fd_snapshot_create_get_is_incremental( is_constipated );
     ulong snapshot_slot  = fd_snapshot_create_get_slot( is_constipated );
 
-    if( !is_incremental ) {
-      ctx->last_full_snap = snapshot_slot;
-    }
-
     if( ctx->last_full_snap != 0UL && !is_incremental ) {
       FD_LOG_ERR(("SUCCESSUFL EXIT"));
+    }
+
+    if( !is_incremental ) {
+      ctx->last_full_snap = snapshot_slot;
     }
     
     FD_LOG_WARNING(("CREATING SNAPSHOT %lu %lu", is_incremental, snapshot_slot));
 
     uchar * mem = fd_valloc_malloc( fd_scratch_virtual(), FD_ACC_MGR_ALIGN, FD_ACC_MGR_FOOTPRINT );
-
-    FD_TEST( ctx->tpool );
 
     fd_snapshot_ctx_t snapshot_ctx = {
       .slot           = snapshot_slot,
@@ -264,7 +297,6 @@ after_credit( fd_snapshot_tile_ctx_t * ctx         FD_PARAM_UNUSED,
       .snapshot_fd    = is_incremental ? ctx->incremental_snapshot_fd : ctx->full_snapshot_fd,
       .tpool          = ctx->tpool,
       .last_snap_slot = is_incremental ? ctx->last_full_snap : 0UL,
-
     };
 
     if( !is_incremental ) {

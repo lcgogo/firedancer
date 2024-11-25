@@ -256,6 +256,8 @@ struct fd_replay_tile_ctx {
 
   ulong * is_funk_constipated;  /* Shared fseq to determine if funk/status cache should be constipated */
   ulong   prev_snapshot_gap;    /* Tracking for snapshot creation */
+
+  int is_caught_up;
 };
 typedef struct fd_replay_tile_ctx fd_replay_tile_ctx_t;
 
@@ -612,9 +614,9 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
   }
   fd_funk_start_write( ctx->funk );
 
-  ulong is_funk_constipated = fd_fseq_query( ctx->is_funk_constipated );
+  //ulong is_funk_constipated = fd_fseq_query( ctx->is_funk_constipated );
 
-  if( !is_funk_constipated ) {
+  if( !ctx->is_caught_up || !fd_fseq_query( ctx->is_funk_constipated ) ) {
     FD_LOG_WARNING(("PUBLISHING SLOT %lu", smr));
 
     ulong rc = fd_funk_txn_publish( ctx->funk, root_txn, 1 );
@@ -662,27 +664,29 @@ funk_publish( fd_replay_tile_ctx_t * ctx, ulong smr ) {
      interval and no snapshot is currently in progress. This is to handle the
      case where the snapshot interval falls on a skipped slot. */
 
-  ulong curr_snapshot_gap      = smr % ctx->snapshot_interval;
-  ulong is_constipated         = fd_fseq_query( ctx->is_funk_constipated );
-  uchar is_full_snapshot_ready = curr_snapshot_gap < ctx->prev_snapshot_gap && !is_constipated;
-  uchar is_inc_snapshot_ready  = smr % ctx->incremental_interval == 0 && !is_constipated && ctx->last_full_snap; /* TODO: add snapshot gap accounting here */ 
-          
-  ctx->prev_snapshot_gap  = curr_snapshot_gap;
+  if( ctx->is_caught_up ) {
+    ulong curr_snapshot_gap      = smr % ctx->snapshot_interval;
+    ulong is_constipated         = fd_fseq_query( ctx->is_funk_constipated );
+    uchar is_full_snapshot_ready = curr_snapshot_gap < ctx->prev_snapshot_gap && !is_constipated;
+    uchar is_inc_snapshot_ready  = smr % ctx->incremental_interval == 0 && !is_constipated && ctx->last_full_snap; /* TODO: add snapshot gap accounting here */ 
+            
+    ctx->prev_snapshot_gap  = curr_snapshot_gap;
 
-  ulong updated_fseq = 0UL;
-  if( is_full_snapshot_ready || is_inc_snapshot_ready ) {
-    if( is_full_snapshot_ready ) {
-      ctx->last_full_snap = smr;
-      FD_LOG_WARNING(("CREATING FULL SNAPSHOT"));
-      updated_fseq = fd_snapshot_create_pack_fseq( 0, smr );
-    } else {
-      FD_LOG_WARNING(("CREATING INCREMENTAL SNAPSHOT"));
-      updated_fseq = fd_snapshot_create_pack_fseq( 1, smr );
+    ulong updated_fseq = 0UL;
+    if( is_full_snapshot_ready || is_inc_snapshot_ready ) {
+      if( is_full_snapshot_ready ) {
+        ctx->last_full_snap = smr;
+        FD_LOG_WARNING(("CREATING FULL SNAPSHOT"));
+        updated_fseq = fd_snapshot_create_pack_fseq( 0, smr );
+      } else {
+        FD_LOG_WARNING(("CREATING INCREMENTAL SNAPSHOT"));
+        updated_fseq = fd_snapshot_create_pack_fseq( 1, smr );
+      }
+      fd_fseq_update( ctx->is_funk_constipated, updated_fseq );
+
+      FD_LOG_WARNING(("CONSTIPATING AFTER ROOTING SLOT %lu %lu", fd_snapshot_create_get_is_incremental( updated_fseq ),
+                                                                fd_snapshot_create_get_slot( updated_fseq ) ));
     }
-    fd_fseq_update( ctx->is_funk_constipated, updated_fseq );
-
-    FD_LOG_WARNING(("CONSTIPATING AFTER ROOTING SLOT %lu %lu", fd_snapshot_create_get_is_incremental( updated_fseq ),
-                                                               fd_snapshot_create_get_slot( updated_fseq ) ));
   }
 
   if( FD_UNLIKELY( ctx->capture_ctx ) ) {
@@ -1211,6 +1215,11 @@ after_frag( fd_replay_tile_ctx_t * ctx,
 
         FD_LOG_WARNING( ( "still catching up. not voting." ) );
       } else {
+
+
+        if( FD_UNLIKELY( !ctx->is_caught_up ) ) {
+          ctx->is_caught_up = 1;
+        }
 
         /* Proceed according to how local and cluster are synchronized. */
 
@@ -1743,41 +1752,47 @@ unprivileged_init( fd_topo_t *      topo,
   /* funk                                                               */
   /**********************************************************************/
 
-  ulong funk_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "funk" );
-  FD_TEST( funk_obj_id!=ULONG_MAX );
-  ctx->funk = fd_funk_join( fd_topo_obj_laddr( topo, funk_obj_id ) );
-  if( ctx->funk==NULL ) {
-    FD_LOG_ERR(( "no funk" ));
-  }
-  ctx->funk_wksp = fd_funk_wksp( ctx->funk );
+  // ulong funk_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "funk" );
+  // FD_TEST( funk_obj_id!=ULONG_MAX );
+  // ctx->funk = fd_funk_join( fd_topo_obj_laddr( topo, funk_obj_id ) );
+  // if( ctx->funk==NULL ) {
+  //   FD_LOG_ERR(( "no funk" ));
+  // }
+  // ctx->funk_wksp = fd_funk_wksp( ctx->funk );
+
+  FD_LOG_WARNING(("MAKE IT HERE"));
 
   /* TODO: This below code needs to be shared as a topology object. */
-  // fd_funk_t * funk;
-  // const char * snapshot = tile->replay.snapshot;
-  // if( strcmp( snapshot, "funk" ) == 0 ) {
-  //   /* Funk database already exists. The parameters are actually mostly ignored. */
-  //   funk = fd_funk_open_file(
-  //     tile->replay.funk_file, 1, ctx->funk_seed, tile->replay.funk_txn_max,
-  //       tile->replay.funk_rec_max, tile->replay.funk_sz_gb * (1UL<<30),
-  //       FD_FUNK_READ_WRITE, NULL );
-  // } else if( strncmp( snapshot, "wksp:", 5 ) == 0) {
-  //   /* Recover funk database from a checkpoint. */
-  //   funk = fd_funk_recover_checkpoint( tile->replay.funk_file, 1, snapshot+5, NULL );
-  // } else {
-  //   /* Create new funk database */
-  //   funk = fd_funk_open_file(
-  //     tile->replay.funk_file, 1, ctx->funk_seed, tile->replay.funk_txn_max,
-  //       tile->replay.funk_rec_max, tile->replay.funk_sz_gb * (1UL<<30),
-  //       FD_FUNK_OVERWRITE, NULL );
-  // }
-  // if( funk == NULL ) {
-  //   FD_LOG_ERR(( "no funk loaded" ));
-  // }
-  // ctx->funk = funk;
-  // ctx->funk_wksp = fd_funk_wksp( funk );
-  // if( ctx->funk_wksp == NULL ) {
-  //   FD_LOG_ERR(( "no funk wksp" ));
-  // }
+  fd_funk_t * funk;
+  const char * snapshot = tile->replay.snapshot;
+  if( strcmp( snapshot, "funk" ) == 0 ) {
+    /* Funk database already exists. The parameters are actually mostly ignored. */
+    funk = fd_funk_open_file(
+      tile->replay.funk_file, 1, ctx->funk_seed, tile->replay.funk_txn_max,
+        tile->replay.funk_rec_max, tile->replay.funk_sz_gb * (1UL<<30),
+        FD_FUNK_READ_WRITE, NULL );
+  } else if( strncmp( snapshot, "wksp:", 5 ) == 0) {
+    /* Recover funk database from a checkpoint. */
+    funk = fd_funk_recover_checkpoint( tile->replay.funk_file, 1, snapshot+5, NULL );
+  } else {
+    /* Create new funk database */
+    FD_LOG_WARNING(("FUNK FILE CREATING"));
+    funk = fd_funk_open_file(
+      tile->replay.funk_file, 1, ctx->funk_seed, tile->replay.funk_txn_max,
+        tile->replay.funk_rec_max, tile->replay.funk_sz_gb * (1UL<<30),
+        FD_FUNK_OVERWRITE, NULL );
+    FD_LOG_WARNING(("FUNK FILE CREATING"));
+  }
+  if( funk == NULL ) {
+    FD_LOG_ERR(( "no funk loaded" ));
+  }
+  ctx->funk = funk;
+  ctx->funk_wksp = fd_funk_wksp( funk );
+  if( ctx->funk_wksp == NULL ) {
+    FD_LOG_ERR(( "no funk wksp" ));
+  }
+
+  ctx->is_caught_up = 0;
 
   /**********************************************************************/
   /* root_slot fseq                                                     */

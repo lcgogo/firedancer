@@ -118,7 +118,7 @@ out1( fd_topo_t const *      topo,
   return (fd_poh_out_ctx_t){ .idx = idx, .mem = mem, .chunk0 = chunk0, .wmark = wmark, .chunk = chunk0 };
 }
 
-struct fd_replay_complete_msg {
+struct __attribute__((packed, aligned(8))) fd_replay_complete_msg {
   ulong slot;
   ulong total_txn_count;
   ulong nonvote_txn_count;
@@ -130,3 +130,33 @@ struct fd_replay_complete_msg {
   ulong parent_slot;
 };
 typedef struct fd_replay_complete_msg fd_replay_complete_msg_t;
+
+struct __attribute__((packed, aligned(8))) fd_gossip_update_msg {
+  uchar  pubkey[32];			// 0..31
+  ulong  wallclock; 			// 32..39
+  ushort shred_version;			// 40..41
+  uchar  version_type;			// 42
+  ushort version_major;			// 43..44
+  ushort version_minor;			// 45..46
+  ushort version_patch;			// 47..48
+  uchar  version_commit_type;		// 49
+  uint   version_commit;		// 50..53
+  uint   version_feature_set;		// 54..57
+    /* gossip_socket,
+       rpc_socket,
+       rpc_pubsub_socket,
+       serve_repair_socket_udp,
+       serve_repair_socket_quic,
+       tpu_socket_udp,
+       tpu_socket_quic,
+       tvu_socket_udp,
+       tvu_socket_quic,
+       tpu_forwards_socket_udp,
+       tpu_forwards_socket_quic,
+       tpu_vote_socket, */
+  struct __attribute__((packed)) {
+    uint ip;				// 0..3
+    ushort port;			// 4..5
+  } addrs[12];
+};
+typedef struct fd_gossip_update_msg fd_gossip_update_msg_t;

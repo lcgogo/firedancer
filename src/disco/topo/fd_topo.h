@@ -242,6 +242,7 @@ typedef struct {
       char  cluster_version[ 32 ];
       int   in_wen_restart;
       char  wen_restart_coordinator[ FD_BASE58_ENCODED_32_SZ ];
+      int   plugins_enabled;
 
       /* not specified by [tiles.replay] */
 

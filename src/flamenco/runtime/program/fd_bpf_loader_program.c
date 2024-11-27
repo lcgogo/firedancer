@@ -1944,8 +1944,8 @@ fd_bpf_loader_program_execute( fd_exec_instr_ctx_t * ctx ) {
 
 int
 fd_directly_invoke_loader_v3_deploy( fd_exec_slot_ctx_t * slot_ctx,
-                                     const uchar *        programdata,
-                                     ulong                programdata_size ) {
+                                     const uchar *        elf,
+                                     ulong                elf_sz ) {
   /* Set up a dummy instr and txn context */
   fd_exec_txn_ctx_t * txn_ctx = fd_exec_txn_ctx_join( fd_exec_txn_ctx_new( fd_scratch_alloc( FD_EXEC_TXN_CTX_ALIGN, FD_EXEC_TXN_CTX_FOOTPRINT ) ) );
   fd_exec_txn_ctx_from_exec_slot_ctx( slot_ctx, txn_ctx );
@@ -1966,5 +1966,5 @@ fd_directly_invoke_loader_v3_deploy( fd_exec_slot_ctx_t * slot_ctx,
     .child_cnt = 0U,
   };
 
-  return deploy_program( instr_ctx, programdata, programdata_size );
+  return deploy_program( instr_ctx, elf, elf_sz );
 }

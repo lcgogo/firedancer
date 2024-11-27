@@ -34,7 +34,6 @@
 #include "../../../../disco/store/fd_epoch_forks.h"
 #include "../../../../funk/fd_funk_filemap.h"
 #include "../../../../disco/plugin/fd_plugin.h"
-#include "fd_poh_link.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -165,8 +164,27 @@ struct fd_replay_tile_ctx {
   ulong       stake_weights_out_wmark;
   ulong       stake_weights_out_chunk;
 
-  poh_link_t replay_plugin;
-  poh_link_t start_progress_plugin;
+  // Inputs to plugin/gui
+
+  fd_frag_meta_t * replay_plugin_out_mcache;
+  ulong *          replay_plugin_out_sync;
+  ulong            replay_plugin_out_depth;
+  ulong            replay_plugin_out_seq;
+
+  fd_wksp_t * replay_plugin_out_mem;
+  ulong       replay_plugin_out_chunk0;
+  ulong       replay_plugin_out_wmark;
+  ulong       replay_plugin_out_chunk;
+
+  fd_frag_meta_t * start_plugin_out_mcache;
+  ulong *          start_plugin_out_sync;
+  ulong            start_plugin_out_depth;
+  ulong            start_plugin_out_seq;
+
+  fd_wksp_t * start_plugin_out_mem;
+  ulong       start_plugin_out_chunk0;
+  ulong       start_plugin_out_wmark;
+  ulong       start_plugin_out_chunk;
 
   char const * blockstore_checkpt;
   int          blockstore_publish;
@@ -670,6 +688,32 @@ publish_account_notifications( fd_replay_tile_ctx_t * ctx,
 }
 
 static void
+replay_plugin_publish( fd_replay_tile_ctx_t * ctx,
+                       ulong sig,
+                       uchar const * data,
+                       ulong data_sz ) {
+  uchar * dst = (uchar *)fd_chunk_to_laddr( ctx->replay_plugin_out_mem, ctx->replay_plugin_out_chunk );
+  fd_memcpy( dst, data, data_sz );
+  ulong tspub = (ulong)fd_frag_meta_ts_comp( fd_tickcount() );
+  fd_mcache_publish( ctx->replay_plugin_out_mcache, ctx->replay_plugin_out_depth, ctx->replay_plugin_out_seq, sig, ctx->replay_plugin_out_chunk, data_sz, 0UL, 0UL, tspub );
+  ctx->replay_plugin_out_chunk = fd_dcache_compact_next( ctx->replay_plugin_out_chunk, data_sz, ctx->replay_plugin_out_chunk0, ctx->replay_plugin_out_wmark );
+  ctx->replay_plugin_out_seq++;
+}
+
+static void
+start_plugin_publish( fd_replay_tile_ctx_t * ctx,
+                      ulong sig,
+                      uchar const * data,
+                      ulong data_sz ) {
+  uchar * dst = (uchar *)fd_chunk_to_laddr( ctx->start_plugin_out_mem, ctx->start_plugin_out_chunk );
+  fd_memcpy( dst, data, data_sz );
+  ulong tspub = (ulong)fd_frag_meta_ts_comp( fd_tickcount() );
+  fd_mcache_publish( ctx->start_plugin_out_mcache, ctx->start_plugin_out_depth, ctx->start_plugin_out_seq, sig, ctx->start_plugin_out_chunk, data_sz, 0UL, 0UL, tspub );
+  ctx->start_plugin_out_chunk = fd_dcache_compact_next( ctx->start_plugin_out_chunk, data_sz, ctx->start_plugin_out_chunk0, ctx->start_plugin_out_wmark );
+  ctx->start_plugin_out_seq++;
+}
+
+static void
 publish_slot_notifications( fd_replay_tile_ctx_t * ctx,
                             fd_fork_t *            fork,
                             fd_block_map_t const * block_map_entry,
@@ -717,7 +761,7 @@ publish_slot_notifications( fd_replay_tile_ctx_t * ctx,
     .priority_fee = fork->slot_ctx.slot_bank.collected_priority_fees,
     .parent_slot = ctx->parent_slot,
   };
-  poh_link_publish( &ctx->replay_plugin, FD_PLUGIN_MSG_SLOT_COMPLETED, (uchar const *)&msg2, sizeof(msg2) );
+  replay_plugin_publish( ctx, FD_PLUGIN_MSG_SLOT_COMPLETED, (uchar const *)&msg2, sizeof(msg2) );
 }
 
 static void
@@ -1116,7 +1160,7 @@ after_frag( fd_replay_tile_ctx_t * ctx,
       } while( 1 );
       *(ulong*)(msg + 8U) = i;
       fd_blockstore_end_read( ctx->blockstore );
-      poh_link_publish( &ctx->replay_plugin, FD_PLUGIN_MSG_SLOT_RESET, msg, sizeof(msg) );
+      replay_plugin_publish( ctx, FD_PLUGIN_MSG_SLOT_RESET, msg, sizeof(msg) );
 
       fd_microblock_trailer_t * microblock_trailer = (fd_microblock_trailer_t *)(txns + txn_cnt);
       memcpy( microblock_trailer->hash, reset_fork->slot_ctx.slot_bank.block_hash_queue.last_hash->uc, sizeof(fd_hash_t) );
@@ -1328,7 +1372,7 @@ read_snapshot( void * _ctx, char const * snapshotfile, char const * incremental 
   fd_memset( msg, 0, sizeof(msg) );
   msg[0] = 2;
   msg[1] = 1;
-  poh_link_publish( &ctx->start_progress_plugin, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
 
   /* Pass the slot_ctx to snapshot_load or recover_banks */
 
@@ -1348,7 +1392,7 @@ read_snapshot( void * _ctx, char const * snapshotfile, char const * incremental 
   fd_memset( msg, 0, sizeof(msg) );
   msg[0] = 2;
   msg[1] = 0;
-  poh_link_publish( &ctx->start_progress_plugin, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
 
   if( strlen( incremental ) > 0 ) {
     FD_MCNT_SET( REPLAY, SNAPSHOT_STATUS_INCREMENTAL_BEGIN, 1 );
@@ -1359,7 +1403,7 @@ read_snapshot( void * _ctx, char const * snapshotfile, char const * incremental 
   // ValidatorStartProgress::DownloadedFullSnapshot
   fd_memset( msg, 0, sizeof(msg) );
   msg[0] = 3;
-  poh_link_publish( &ctx->start_progress_plugin, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
 
   fd_runtime_update_leaders( ctx->slot_ctx, ctx->slot_ctx->slot_bank.slot );
   FD_LOG_NOTICE(( "starting fd_bpf_scan_and_create_bpf_program_cache_entry..." ));
@@ -1560,7 +1604,7 @@ after_credit( fd_replay_tile_ctx_t * ctx,
     uchar msg[56];
     fd_memset( msg, 0, sizeof(msg) );
     msg[0] = 11;
-    poh_link_publish( &ctx->start_progress_plugin, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+    start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
   }
 
   if( FD_UNLIKELY( ctx->in_wen_restart ) ) {
@@ -1628,6 +1672,20 @@ privileged_init( fd_topo_t *      topo,
 
   FD_TEST( sizeof(ulong) == getrandom( &ctx->funk_seed, sizeof(ulong), 0 ) );
   FD_TEST( sizeof(ulong) == getrandom( &ctx->status_cache_seed, sizeof(ulong), 0 ) );
+}
+
+static fd_topo_link_t const *
+  find_out( fd_topo_t const *      topo,
+            fd_topo_tile_t const * tile,
+            char const *           name ) {
+  for( ulong i=0UL; i<tile->out_cnt; i++ ) {
+    fd_topo_link_t const * link = &topo->links[ tile->out_link_id[ i ] ];
+    if( !strcmp( link->name, name ) ) {
+      return link;
+    }
+  }
+  FD_LOG_ERR(( "tile %s:%lu had no output links named %s", tile->name, tile->kind_id, name ));
+  return NULL;
 }
 
 static void
@@ -1926,25 +1984,6 @@ unprivileged_init( fd_topo_t *      topo,
     poh_out->chunk            = poh_out->chunk0;
   }
 
-  if( FD_LIKELY( tile->replay.plugins_enabled ) ) {
-    poh_link_init( &ctx->replay_plugin, topo, tile, out1( topo, tile, "replay_plugi" ).idx );
-    poh_link_init( &ctx->start_progress_plugin, topo, tile, out1( topo, tile, "startp_plugi" ).idx );
-  } else {
-    /* Mark these mcaches as "available", so the system boots, but the
-       memory is not set so nothing will actually get published via.
-       the links. */
-    FD_COMPILER_MFENCE();
-    ctx->replay_plugin.mcache = (fd_frag_meta_t*)1;
-    ctx->start_progress_plugin.mcache = (fd_frag_meta_t*)1;
-    FD_COMPILER_MFENCE();
-  }
-
-  // ulong busy_obj_id = fd_pod_queryf_ulong( topo->props, ULONG_MAX, "first_turbine" );
-  // FD_TEST( busy_obj_id != ULONG_MAX );
-  // ctx->first_turbine = fd_fseq_join( fd_topo_obj_laddr( topo, busy_obj_id ) );
-  // if( FD_UNLIKELY( !ctx->first_turbine ) )
-  //   FD_LOG_ERR( ( "replay tile %lu has no busy flag", tile->kind_id ) );
-
   ctx->poh_init_done = 0U;
   ctx->snapshot_init_done = 0;
 
@@ -2041,6 +2080,28 @@ unprivileged_init( fd_topo_t *      topo,
   ctx->stake_weights_out_wmark  = fd_dcache_compact_wmark ( ctx->stake_weights_out_mem, stake_weights_out->dcache, stake_weights_out->mtu );
   ctx->stake_weights_out_chunk  = ctx->stake_weights_out_chunk0;
 
+  if( FD_LIKELY( tile->replay.plugins_enabled ) ) {
+    fd_topo_link_t const * replay_plugin_out = find_out( topo, tile, "replay_plugi" );
+    ctx->replay_plugin_out_mcache      = replay_plugin_out->mcache;
+    ctx->replay_plugin_out_sync        = fd_mcache_seq_laddr( ctx->replay_plugin_out_mcache );
+    ctx->replay_plugin_out_depth       = fd_mcache_depth( ctx->replay_plugin_out_mcache );
+    ctx->replay_plugin_out_seq         = fd_mcache_seq_query( ctx->replay_plugin_out_sync );
+    ctx->replay_plugin_out_mem         = topo->workspaces[ topo->objs[ replay_plugin_out->dcache_obj_id ].wksp_id ].wksp;
+    ctx->replay_plugin_out_chunk0      = fd_dcache_compact_chunk0( ctx->replay_plugin_out_mem, replay_plugin_out->dcache );
+    ctx->replay_plugin_out_wmark       = fd_dcache_compact_wmark ( ctx->replay_plugin_out_mem, replay_plugin_out->dcache, replay_plugin_out->mtu );
+    ctx->replay_plugin_out_chunk       = ctx->replay_plugin_out_chunk0;
+
+    fd_topo_link_t const * start_plugin_out = find_out( topo, tile, "startp_plugi" );
+    ctx->start_plugin_out_mcache       = start_plugin_out->mcache;
+    ctx->start_plugin_out_sync         = fd_mcache_seq_laddr( ctx->start_plugin_out_mcache );
+    ctx->start_plugin_out_depth        = fd_mcache_depth( ctx->start_plugin_out_mcache );
+    ctx->start_plugin_out_seq          = fd_mcache_seq_query( ctx->start_plugin_out_sync );
+    ctx->start_plugin_out_mem          = topo->workspaces[ topo->objs[ start_plugin_out->dcache_obj_id ].wksp_id ].wksp;
+    ctx->start_plugin_out_chunk0       = fd_dcache_compact_chunk0( ctx->start_plugin_out_mem, start_plugin_out->dcache );
+    ctx->start_plugin_out_wmark        = fd_dcache_compact_wmark ( ctx->start_plugin_out_mem, start_plugin_out->dcache, start_plugin_out->mtu );
+    ctx->start_plugin_out_chunk        = ctx->start_plugin_out_chunk0;
+  }
+
   if( strnlen( tile->replay.slots_replayed, sizeof(tile->replay.slots_replayed) )>0UL ) {
     ctx->slots_replayed_file = fopen( tile->replay.slots_replayed, "w" );
     FD_TEST( ctx->slots_replayed_file );
@@ -2049,7 +2110,7 @@ unprivileged_init( fd_topo_t *      topo,
   // ValidatorStartProgress::Initializing
   uchar msg[56];
   fd_memset( msg, 0, sizeof(msg) );
-  poh_link_publish( &ctx->start_progress_plugin, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
 }
 
 static ulong

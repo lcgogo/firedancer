@@ -2,7 +2,6 @@
 #define HEADER_fd_src_disco_topo_fd_topo_h
 
 #include "../stem/fd_stem.h"
-#include "../quic/fd_tpu.h"
 #include "../../tango/fd_tango.h"
 #include "../../waltz/xdp/fd_xdp1.h"
 #include "../../ballet/base58/fd_base58.h"
@@ -61,20 +60,17 @@ typedef struct {
   char  name[ 13UL ]; /* The name of this link, like "pack_bank". There can be multiple of each link name in a topology. */
   ulong kind_id;      /* The ID of this link within its name.  If there are N links of a particular name, they have IDs [0, N).  The pair (name, kind_id) uniquely identifies a link, as does "id" on its own. */
 
-  int   is_reasm; /* If the link is a reassembly buffer. */
   ulong depth;    /* The depth of the mcache representing the link. */
   ulong mtu;      /* The MTU of data fragments in the mcache.  A value of 0 means there is no dcache. */
   ulong burst;    /* The max amount of MTU sized data fragments that might be bursted to the dcache. */
 
   ulong mcache_obj_id;
   ulong dcache_obj_id;
-  ulong reasm_obj_id;
 
   /* Computed fields.  These are not supplied as configuration but calculated as needed. */
   struct {
     fd_frag_meta_t * mcache; /* The mcache of this link. */
     void *           dcache; /* The dcache of this link, if it has one. */
-    fd_tpu_reasm_t * reasm;  /* The reassembly buffer of this link, if it has one. */
   };
 } fd_topo_link_t;
 
@@ -152,6 +148,7 @@ typedef struct {
     } net;
 
     struct {
+      uint   out_depth;
       uint   reasm_cnt;
       ulong  max_concurrent_connections;
       ulong  max_concurrent_handshakes;
@@ -221,11 +218,6 @@ typedef struct {
     } metric;
 
     struct {
-
-      /* specified by [tiles.replay] */
-
-      char  blockstore_checkpt[ PATH_MAX ];
-      int   blockstore_publish;
       int   tx_metadata_storage;
       char  capture[ PATH_MAX ];
       char  funk_checkpt[ PATH_MAX ];
@@ -244,7 +236,7 @@ typedef struct {
       char  wen_restart_coordinator[ FD_BASE58_ENCODED_32_SZ ];
       int   plugins_enabled;
 
-      /* not specified by [tiles.replay] */
+      /* not specified in TOML */
 
       char  identity_key_path[ PATH_MAX ];
       uint  ip_addr;
@@ -252,6 +244,9 @@ typedef struct {
       int   vote;
       char  vote_account_path[ PATH_MAX ];
       ulong bank_tile_count;
+
+      char  blockstore_file[ PATH_MAX ];
+      char  blockstore_checkpt[ PATH_MAX ];
     } replay;
 
     struct {
@@ -305,11 +300,6 @@ typedef struct {
     } repair;
 
     struct {
-      ulong blockstore_shred_max;
-      ulong blockstore_block_max;
-      ulong blockstore_txn_max;
-      ulong blockstore_alloc_max;
-      char  blockstore_restore[ PATH_MAX ];
       char  slots_pending[PATH_MAX];
 
       ulong expected_shred_version;
@@ -321,6 +311,9 @@ typedef struct {
       char  shred_cap_replay[ PATH_MAX ];
 
       int   in_wen_restart;
+
+      char  blockstore_file[ PATH_MAX ];
+      char  blockstore_restore[ PATH_MAX ];
     } store_int;
 
     struct {
@@ -343,6 +336,7 @@ typedef struct {
       uint    tpu_ip_addr;
       char    identity_key_path[ PATH_MAX ];
     } rpcserv;
+
   };
 } fd_topo_tile_t;
 

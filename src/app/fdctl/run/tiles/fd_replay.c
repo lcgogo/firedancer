@@ -1686,9 +1686,9 @@ privileged_init( fd_topo_t *      topo,
 }
 
 static fd_topo_link_t const *
-  find_out( fd_topo_t const *      topo,
-            fd_topo_tile_t const * tile,
-            char const *           name ) {
+find_out( fd_topo_t const *      topo,
+          fd_topo_tile_t const * tile,
+          char const *           name ) {
   for( ulong i=0UL; i<tile->out_cnt; i++ ) {
     fd_topo_link_t const * link = &topo->links[ tile->out_link_id[ i ] ];
     if( !strcmp( link->name, name ) ) {

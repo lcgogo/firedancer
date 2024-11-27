@@ -453,12 +453,12 @@ fd_topo_initialize( config_t * config ) {
     fd_topob_wksp( topo, "plugin_out"   );
     fd_topob_wksp( topo, "plugin"       );
 
-    /**/                 fd_topob_link( topo, "plugin_out",   "plugin_out",   0,        128UL,                                    8UL+40200UL*(58UL+12UL*34UL), 1UL );
-    /**/                 fd_topob_link( topo, "replay_plugi", "plugin_in",    0,        128UL,                                    4098*8UL,               1UL );
-    /**/                 fd_topob_link( topo, "gossip_plugi", "plugin_in",    0,        128UL,                                    8UL+40200UL*(58UL+12UL*34UL), 1UL );
-    /**/                 fd_topob_link( topo, "poh_plugin",   "plugin_in",    0,        128UL,                                    16UL,                   1UL );
-    /**/                 fd_topob_link( topo, "startp_plugi", "plugin_in",    0,        128UL,                                    56UL,                   1UL );
-    /**/                 fd_topob_link( topo, "votel_plugin", "plugin_in",    0,        128UL,                                    8UL,                    1UL );
+    /**/                 fd_topob_link( topo, "plugin_out",   "plugin_out",   128UL,                                    8UL+40200UL*(58UL+12UL*34UL), 1UL );
+    /**/                 fd_topob_link( topo, "replay_plugi", "plugin_in",    128UL,                                    4098*8UL,               1UL );
+    /**/                 fd_topob_link( topo, "gossip_plugi", "plugin_in",    128UL,                                    8UL+40200UL*(58UL+12UL*34UL), 1UL );
+    /**/                 fd_topob_link( topo, "poh_plugin",   "plugin_in",    128UL,                                    16UL,                   1UL );
+    /**/                 fd_topob_link( topo, "startp_plugi", "plugin_in",    128UL,                                    56UL,                   1UL );
+    /**/                 fd_topob_link( topo, "votel_plugin", "plugin_in",    128UL,                                    8UL,                    1UL );
 
     /**/                 fd_topob_tile( topo, "plugin",  "plugin",  "metric_in",  tile_to_cpu[ topo->tile_cnt ], 0 );
 

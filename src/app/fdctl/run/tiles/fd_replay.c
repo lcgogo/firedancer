@@ -740,18 +740,20 @@ publish_slot_notifications( fd_replay_tile_ctx_t * ctx,
   notify_time_ns += fd_log_wallclock();
   FD_LOG_DEBUG(("TIMING: notify_slot_time - slot: %lu, elapsed: %6.6f ms", curr_slot, (double)notify_time_ns * 1e-6));
 
-  fd_replay_complete_msg_t msg2 = {
-    .slot = curr_slot,
-    .total_txn_count = fork->slot_ctx.slot_bank.transaction_count - fork->slot_ctx.parent_transaction_count,
-    .nonvote_txn_count = 0,
-    .failed_txn_count = 0,
-    .nonvote_failed_txn_count = 0,
-    .compute_units = 0,
-    .transaction_fee = fork->slot_ctx.slot_bank.collected_execution_fees,
-    .priority_fee = fork->slot_ctx.slot_bank.collected_priority_fees,
-    .parent_slot = ctx->parent_slot,
-  };
-  replay_plugin_publish( ctx, FD_PLUGIN_MSG_SLOT_COMPLETED, (uchar const *)&msg2, sizeof(msg2) );
+  if( ctx->replay_plugin_out_mem ) {
+    fd_replay_complete_msg_t msg2 = {
+      .slot = curr_slot,
+      .total_txn_count = fork->slot_ctx.slot_bank.transaction_count - fork->slot_ctx.parent_transaction_count,
+      .nonvote_txn_count = 0,
+      .failed_txn_count = 0,
+      .nonvote_failed_txn_count = 0,
+      .compute_units = 0,
+      .transaction_fee = fork->slot_ctx.slot_bank.collected_execution_fees,
+      .priority_fee = fork->slot_ctx.slot_bank.collected_priority_fees,
+      .parent_slot = ctx->parent_slot,
+    };
+    replay_plugin_publish( ctx, FD_PLUGIN_MSG_SLOT_COMPLETED, (uchar const *)&msg2, sizeof(msg2) );
+  }
 }
 
 static void
@@ -1131,26 +1133,28 @@ after_frag( fd_replay_tile_ctx_t * ctx,
 
       /* Update the gui */
 
-      uchar msg[4098*8] __attribute__( ( aligned( 8U ) ) );
-      fd_memset( msg, 0, sizeof(msg) );
-      fd_blockstore_start_read( ctx->blockstore );
-      ulong s = reset_fork->slot_ctx.slot_bank.slot;
-      *(ulong*)(msg + 16U) = s;
-      ulong i = 0;
-      do {
-        block_map_entry = fd_blockstore_block_map_query( ctx->blockstore, curr_slot );
-        if( block_map_entry == NULL ) {
-          break;
-        }
-        s = block_map_entry->parent_slot;
-        *(ulong*)(msg + 24U + i*8U) = s;
-        if( ++i == 4095U ) {
-          break;
-        }
-      } while( 1 );
-      *(ulong*)(msg + 8U) = i;
-      fd_blockstore_end_read( ctx->blockstore );
-      replay_plugin_publish( ctx, FD_PLUGIN_MSG_SLOT_RESET, msg, sizeof(msg) );
+      if( ctx->replay_plugin_out_mem ) {
+        uchar msg[4098*8] __attribute__( ( aligned( 8U ) ) );
+        fd_memset( msg, 0, sizeof(msg) );
+        fd_blockstore_start_read( ctx->blockstore );
+        ulong s = reset_fork->slot_ctx.slot_bank.slot;
+        *(ulong*)(msg + 16U) = s;
+        ulong i = 0;
+        do {
+          block_map_entry = fd_blockstore_block_map_query( ctx->blockstore, curr_slot );
+          if( block_map_entry == NULL ) {
+            break;
+          }
+          s = block_map_entry->parent_slot;
+          *(ulong*)(msg + 24U + i*8U) = s;
+          if( ++i == 4095U ) {
+            break;
+          }
+        } while( 1 );
+        *(ulong*)(msg + 8U) = i;
+        fd_blockstore_end_read( ctx->blockstore );
+        replay_plugin_publish( ctx, FD_PLUGIN_MSG_SLOT_RESET, msg, sizeof(msg) );
+      }
 
       fd_microblock_trailer_t * microblock_trailer = (fd_microblock_trailer_t *)(txns + txn_cnt);
       memcpy( microblock_trailer->hash, reset_fork->slot_ctx.slot_bank.block_hash_queue.last_hash->uc, sizeof(fd_hash_t) );
@@ -1357,12 +1361,14 @@ static void
 read_snapshot( void * _ctx, char const * snapshotfile, char const * incremental ) {
   fd_replay_tile_ctx_t * ctx = (fd_replay_tile_ctx_t *)_ctx;
 
-  // ValidatorStartProgress::DownloadingSnapshot
-  uchar msg[56];
-  fd_memset( msg, 0, sizeof(msg) );
-  msg[0] = 2;
-  msg[1] = 1;
-  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  if( ctx->start_plugin_out_mem ) {
+    // ValidatorStartProgress::DownloadingSnapshot
+    uchar msg[56];
+    fd_memset( msg, 0, sizeof(msg) );
+    msg[0] = 2;
+    msg[1] = 1;
+    start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  }
 
   /* Pass the slot_ctx to snapshot_load or recover_banks */
 
@@ -1378,11 +1384,14 @@ read_snapshot( void * _ctx, char const * snapshotfile, char const * incremental 
 
   /* Load incremental */
 
-  // ValidatorStartProgress::DownloadingSnapshot
-  fd_memset( msg, 0, sizeof(msg) );
-  msg[0] = 2;
-  msg[1] = 0;
-  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  if( ctx->start_plugin_out_mem ) {
+    // ValidatorStartProgress::DownloadingSnapshot
+    uchar msg[56];
+    fd_memset( msg, 0, sizeof(msg) );
+    msg[0] = 2;
+    msg[1] = 0;
+    start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  }
 
   if( strlen( incremental ) > 0 ) {
     FD_MCNT_SET( REPLAY, SNAPSHOT_STATUS_INCREMENTAL_BEGIN, 1 );
@@ -1390,10 +1399,13 @@ read_snapshot( void * _ctx, char const * snapshotfile, char const * incremental 
     FD_MCNT_SET( REPLAY, SNAPSHOT_STATUS_INCREMENTAL_END, 1 );
   }
 
-  // ValidatorStartProgress::DownloadedFullSnapshot
-  fd_memset( msg, 0, sizeof(msg) );
-  msg[0] = 3;
-  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  if( ctx->start_plugin_out_mem ) {
+    // ValidatorStartProgress::DownloadedFullSnapshot
+    uchar msg[56];
+    fd_memset( msg, 0, sizeof(msg) );
+    msg[0] = 3;
+    start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  }
 
   fd_runtime_update_leaders( ctx->slot_ctx, ctx->slot_ctx->slot_bank.slot );
   FD_LOG_NOTICE(( "starting fd_bpf_scan_and_create_bpf_program_cache_entry..." ));
@@ -1590,11 +1602,13 @@ after_credit( fd_replay_tile_ctx_t * ctx,
       }
     }
 
-    // ValidatorStartProgress::Running
-    uchar msg[56];
-    fd_memset( msg, 0, sizeof(msg) );
-    msg[0] = 11;
-    start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+    if( ctx->start_plugin_out_mem ) {
+      // ValidatorStartProgress::Running
+      uchar msg[56];
+      fd_memset( msg, 0, sizeof(msg) );
+      msg[0] = 11;
+      start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+    }
   }
 
   if( FD_UNLIKELY( ctx->in_wen_restart ) ) {
@@ -2104,10 +2118,12 @@ unprivileged_init( fd_topo_t *      topo,
     FD_TEST( ctx->slots_replayed_file );
   }
 
-  // ValidatorStartProgress::Initializing
-  uchar msg[56];
-  fd_memset( msg, 0, sizeof(msg) );
-  start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  if( ctx->start_plugin_out_mem ) {
+    // ValidatorStartProgress::Initializing
+    uchar msg[56];
+    fd_memset( msg, 0, sizeof(msg) );
+    start_plugin_publish( ctx, FD_PLUGIN_MSG_START_PROGRESS, msg, sizeof(msg) );
+  }
 }
 
 static ulong

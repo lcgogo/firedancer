@@ -1271,12 +1271,6 @@ fd_feature_id_t const ids[] = {
     .name       = "enable_sbpf_v3_deployment_and_execution",
     .cleaned_up = {UINT_MAX, UINT_MAX, UINT_MAX} },
 
-  { .index      = offsetof(fd_features_t, get_sysvar_syscall_enabled)>>3,
-    .id         = {"\xa8\x5b\xef\x52\xf2\x62\x90\x82\x3b\xd2\x06\xdd\x10\xe7\x2c\x5b\x9c\x22\x0e\x96\x8a\xa7\x2e\x98\x8c\x7b\x02\x39\x0e\xd5\x9a\xf4"},
-                  /* CLCoTADvV64PSrnR6QXty6Fwrt9Xc6EdxSJE4wLRePjq */
-    .name       = "get_sysvar_syscall_enabled",
-    .cleaned_up = {UINT_MAX, UINT_MAX, UINT_MAX} },
-
   { .index      = offsetof(fd_features_t, migrate_feature_gate_program_to_core_bpf)>>3,
     .id         = {"\x36\x42\x5c\x66\x18\x1f\x6b\xf4\xea\x34\x18\x98\xd0\xee\x57\x8e\x44\xd3\x69\xb6\x06\x1e\xe4\xea\x37\x86\x08\xb4\x19\xbf\xbb\x7a"},
                   /* 4eohviozzEeivk1y9UbrnekbAFMDQyJz5JjA9Y6gyvky */
@@ -1516,10 +1510,9 @@ fd_feature_id_query( ulong prefix ) {
   case 0xefc2cb9c2b40f3ff: return &ids[ 207 ];
   case 0x408e6a8a269a6ad1: return &ids[ 208 ];
   case 0xbec08bda942c5ea5: return &ids[ 209 ];
-  case 0x829062f252ef5ba8: return &ids[ 210 ];
-  case 0xf46b1f18665c4236: return &ids[ 211 ];
-  case 0xa9a90df1904da912: return &ids[ 212 ];
-  case 0x2434a84be5b684a5: return &ids[ 213 ];
+  case 0xf46b1f18665c4236: return &ids[ 210 ];
+  case 0xa9a90df1904da912: return &ids[ 211 ];
+  case 0x2434a84be5b684a5: return &ids[ 212 ];
   default: break;
   }
 
@@ -1738,9 +1731,8 @@ FD_STATIC_ASSERT( offsetof( fd_features_t, reenable_sbpf_v0_execution           
 FD_STATIC_ASSERT( offsetof( fd_features_t, enable_sbpf_v1_deployment_and_execution                 )>>3==207UL, layout );
 FD_STATIC_ASSERT( offsetof( fd_features_t, enable_sbpf_v2_deployment_and_execution                 )>>3==208UL, layout );
 FD_STATIC_ASSERT( offsetof( fd_features_t, enable_sbpf_v3_deployment_and_execution                 )>>3==209UL, layout );
-FD_STATIC_ASSERT( offsetof( fd_features_t, get_sysvar_syscall_enabled                              )>>3==210UL, layout );
-FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_feature_gate_program_to_core_bpf                )>>3==211UL, layout );
-FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_config_program_to_core_bpf                      )>>3==212UL, layout );
-FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_address_lookup_table_program_to_core_bpf        )>>3==213UL, layout );
+FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_feature_gate_program_to_core_bpf                )>>3==210UL, layout );
+FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_config_program_to_core_bpf                      )>>3==211UL, layout );
+FD_STATIC_ASSERT( offsetof( fd_features_t, migrate_address_lookup_table_program_to_core_bpf        )>>3==212UL, layout );
 
 FD_STATIC_ASSERT( sizeof( fd_features_t )>>3==FD_FEATURE_ID_CNT, layout );

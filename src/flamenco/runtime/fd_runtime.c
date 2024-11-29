@@ -4230,12 +4230,11 @@ fd_new_target_program_data_account( fd_exec_slot_ctx_t *    slot_ctx,
   }
 
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L118-L125 */
-  if( config_upgrade_authority_address!=NULL && state.inner.buffer.authority_address!=NULL ) {
-    if( FD_UNLIKELY( memcmp( config_upgrade_authority_address, state.inner.buffer.authority_address, sizeof(fd_pubkey_t) ) ) ) {
+  if( config_upgrade_authority_address!=NULL ) {
+    if( FD_UNLIKELY( state.inner.buffer.authority_address!=NULL && 
+                     memcmp( config_upgrade_authority_address, state.inner.buffer.authority_address, sizeof(fd_pubkey_t) ) ) ) {
       return -1;
     }
-  } else if( config_upgrade_authority_address!=state.inner.buffer.authority_address ) {
-    return -1;
   }
 
   /* https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L127-L132 */
@@ -4398,6 +4397,10 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
     FD_LOG_WARNING(( "Builtin program ID %s does not exist", FD_BASE58_ENC_32_ALLOCA( builtin_program_id ) ));
     goto fail;
   }
+  if( stateless ) {
+    new_target_program_account->meta->dlen = SIZE_OF_PROGRAM;
+    new_target_program_account->meta->slot = slot_ctx->slot_bank.slot;
+  }
 
   /* Create a new target program account. This modifies the existing record. */
   err = fd_new_target_program_account( slot_ctx, target_program_data_address, new_target_program_account );
@@ -4407,17 +4410,20 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   }
   
   /* Create a new target program data account. */
+  ulong new_target_program_data_account_sz = PROGRAMDATA_METADATA_SIZE - BUFFER_METADATA_SIZE + source_buffer_account->const_meta->dlen;
   FD_BORROWED_ACCOUNT_DECL( new_target_program_data_account );
   err = fd_acc_mgr_modify( slot_ctx->acc_mgr, 
                            slot_ctx->funk_txn, 
                            target_program_data_address, 
                            1, 
-                           PROGRAMDATA_METADATA_SIZE - BUFFER_METADATA_SIZE + source_buffer_account->const_meta->dlen, 
+                           new_target_program_data_account_sz, 
                            new_target_program_data_account );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Failed to create new program data account to %s", FD_BASE58_ENC_32_ALLOCA( target_program_data_address ) ));
     goto fail;
   }
+  new_target_program_data_account->meta->dlen = new_target_program_data_account_sz;
+  new_target_program_data_account->meta->slot = slot_ctx->slot_bank.slot;
 
   err = fd_new_target_program_data_account( slot_ctx, upgrade_authority_address, source_buffer_account, new_target_program_data_account );
   if( FD_UNLIKELY( err ) ) {
@@ -4428,8 +4434,8 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
   /* Deploy the new target Core BPF program. 
      https://github.com/anza-xyz/agave/blob/v2.1.0/runtime/src/bank/builtins/core_bpf_migration/mod.rs#L268-L271 */
   err = fd_directly_invoke_loader_v3_deploy( slot_ctx, 
-                                             new_target_program_data_account->const_data,
-                                             new_target_program_data_account->const_meta->dlen );
+                                             new_target_program_data_account->const_data + PROGRAMDATA_METADATA_SIZE,
+                                             new_target_program_data_account->const_meta->dlen - PROGRAMDATA_METADATA_SIZE );
   if( FD_UNLIKELY( err ) ) {
     FD_LOG_WARNING(( "Failed to deploy program %s", FD_BASE58_ENC_32_ALLOCA( builtin_program_id ) ));
     goto fail;

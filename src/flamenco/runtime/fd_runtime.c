@@ -4397,10 +4397,8 @@ fd_migrate_builtin_to_core_bpf( fd_exec_slot_ctx_t * slot_ctx,
     FD_LOG_WARNING(( "Builtin program ID %s does not exist", FD_BASE58_ENC_32_ALLOCA( builtin_program_id ) ));
     goto fail;
   }
-  if( stateless ) {
-    new_target_program_account->meta->dlen = SIZE_OF_PROGRAM;
-    new_target_program_account->meta->slot = slot_ctx->slot_bank.slot;
-  }
+  new_target_program_account->meta->dlen = SIZE_OF_PROGRAM;
+  new_target_program_account->meta->slot = slot_ctx->slot_bank.slot;
 
   /* Create a new target program account. This modifies the existing record. */
   err = fd_new_target_program_account( slot_ctx, target_program_data_address, new_target_program_account );
